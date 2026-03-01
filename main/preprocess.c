@@ -1,10 +1,11 @@
 #include "preprocess.h"
+#include "config.h"
 
 void setMinMax(int* buffer, int num_channels, int buffer_size, int* min, int* max,
                bool* isDisabled, int disableThreshold) {
   *isDisabled = false;
   for (int i = 0; i < num_channels; i++) {
-    min[i] = 4096;
+    min[i] = ADC_MAX_VALUE + 1;
     max[i] = 0;
     for (int j = 0; j < buffer_size; j++) {
       int val = *(buffer + i * buffer_size + j);

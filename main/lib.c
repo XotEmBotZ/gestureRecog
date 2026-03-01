@@ -1,10 +1,11 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include "lib.h"
+#include "config.h"
 
 void printRes(int raw_val, float proc_val, int channel, int min, int max) {
-    // Map the 0.0-1.0 proc_val back to 0-4095 for consistent plotter visualization
-    int mapped = (int)(proc_val * 4095.0f);
+    // Map the 0.0-1.0 proc_val back to ADC range for consistent plotter visualization
+    int mapped = (int)(proc_val * (float)ADC_MAX_VALUE);
     // As per user instructions: prefix >r* is the completely preprocessed one
     // >channel:raw_val
     // >rchannel:mapped_val

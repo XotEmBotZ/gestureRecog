@@ -4,15 +4,14 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "esp_err.h"
-
-#define DATASET_PATH "/spiffs/dataset.bin"
+#include "config.h"
 
 /**
  * @brief Structure for a single data record in the binary file.
  */
 typedef struct {
-    char label[16];
-    float data[5 * 32]; // Fixed size: NUM_CHANNELS * BUFFER_SIZE
+    char label[MAX_LABEL_LENGTH];
+    float data[NUM_CHANNELS * BUFFER_SIZE]; // Fixed size: NUM_CHANNELS * BUFFER_SIZE
 } sample_record_t;
 
 /**

@@ -8,13 +8,12 @@
 #include "esp_dsp.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include "config.h"
 
 static const char* TAG = "INFERENCE";
 
-#define BATCH_SIZE 20 // Read 20 records at a time from SPIFFS
-
 typedef struct {
-    char label[16];
+    char label[MAX_LABEL_LENGTH];
     float distance;
 } knn_match_t;
 
@@ -57,10 +56,10 @@ void run_knn_inference(float* current_norm_buffer, int num_channels, int buffer_
     size_t sample_size_bytes = sample_size_floats * sizeof(float);
 
     // Aligned buffer for SIMD difference calculation
-    float* diff_f = heap_caps_aligned_alloc(16, sample_size_bytes, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
+    float* diff_f = heap_caps_aligned_alloc(MEMORY_ALIGNMENT, sample_size_bytes, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
     
     // Buffer to hold a batch of records from file
-    sample_record_t* record_batch = malloc(sizeof(sample_record_t) * BATCH_SIZE);
+    sample_record_t* record_batch = malloc(sizeof(sample_record_t) * INFERENCE_BATCH_SIZE);
 
     if (!diff_f || !record_batch) {
         ESP_LOGE(TAG, "Memory allocation failed for inference");
@@ -72,7 +71,7 @@ void run_knn_inference(float* current_norm_buffer, int num_channels, int buffer_
     }
 
     size_t records_read;
-    while ((records_read = fread(record_batch, sizeof(sample_record_t), BATCH_SIZE, f)) > 0) {
+    while ((records_read = fread(record_batch, sizeof(sample_record_t), INFERENCE_BATCH_SIZE, f)) > 0) {
         for (size_t i = 0; i < records_read; i++) {
             // --- ESP32-S3 SIMD ACCELERATED DISTANCE CALCULATION ---
             // Subtract current sample from stored sample

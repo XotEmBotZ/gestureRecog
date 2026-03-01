@@ -16,12 +16,7 @@
 #include "storage.h"
 #include "preprocess.h"
 #include "inference.h"
-
-#define NUM_CHANNELS 5
-#define BUFFER_SIZE 32
-#define DISABLE_THRESHOLD 20
-#define INFERENCE_INTERVAL_MS 1000
-#define LOOP_PERIOD_MS 100
+#include "config.h"
 
 typedef enum { MODE_INFER, MODE_TRAIN } app_mode_t;
 
@@ -31,60 +26,60 @@ static int* global_buffer = NULL;
 static float* global_norm_buffer = NULL;
 static int global_idx = 0;
 static bool should_store = false;
-static char store_label[16] = {0};
-static int k_neighbors = 3;
+static char store_label[MAX_LABEL_LENGTH] = {0};
+static int k_neighbors = DEFAULT_K_NEIGHBORS;
 
 void show_help() {
     printf("\n=== ESP-Ossicoloscope Help (File-Based Storage) ===\n");
     printf("Commands:\n");
-    printf("  help          - Show this help message\n");
-    printf("  mode train    - Switch to Training Mode\n");
-    printf("  mode infer    - Switch to Inference Mode (KNN)\n");
-    printf("  store <label> - Append current preprocessed buffer to dataset file\n");
-    printf("  list          - List all stored records in dataset file\n");
-    printf("  clear         - Permanently delete the dataset file\n");
-    printf("  k <number>    - Set number of neighbors for KNN (Current: %d)\n", k_neighbors);
+    printf("  %s          - Show this help message\n", CMD_HELP);
+    printf("  %s    - Switch to Training Mode\n", CMD_MODE_TRAIN);
+    printf("  %s    - Switch to Inference Mode (KNN)\n", CMD_MODE_INFER);
+    printf("  %s<label> - Append current preprocessed buffer to dataset file\n", CMD_STORE_PREFIX);
+    printf("  %s          - List all stored records in dataset file\n", CMD_LIST);
+    printf("  %s         - Permanently delete the dataset file\n", CMD_CLEAR);
+    printf("  %s<number>    - Set number of neighbors for KNN (Current: %d)\n", CMD_K_PREFIX, k_neighbors);
     printf("==============================\n");
 }
 
 void console_task(void* arg) {
-  char line[64];
+  char line[CONSOLE_LINE_BUFFER_SIZE];
   while (1) {
     if (fgets(line, sizeof(line), stdin)) {
       line[strcspn(line, "\n")] = 0; // Remove newline
-      if (strcmp(line, "help") == 0) {
+      if (strcmp(line, CMD_HELP) == 0) {
         show_help();
-      } else if (strcmp(line, "mode train") == 0) {
+      } else if (strcmp(line, CMD_MODE_TRAIN) == 0) {
         current_mode = MODE_TRAIN;
         printf("Switched to TRAIN mode\n");
-      } else if (strcmp(line, "mode infer") == 0) {
+      } else if (strcmp(line, CMD_MODE_INFER) == 0) {
         current_mode = MODE_INFER;
         printf("Switched to INFER mode\n");
-      } else if (strcmp(line, "list") == 0) {
+      } else if (strcmp(line, CMD_LIST) == 0) {
         list_stored_buffers(NUM_CHANNELS, BUFFER_SIZE);
-      } else if (strcmp(line, "clear") == 0) {
+      } else if (strcmp(line, CMD_CLEAR) == 0) {
         clear_stored_buffers();
-      } else if (strncmp(line, "k ", 2) == 0) {
-        int val = atoi(line + 2);
-        if (val > 0 && val <= 10) {
+      } else if (strncmp(line, CMD_K_PREFIX, strlen(CMD_K_PREFIX)) == 0) {
+        int val = atoi(line + strlen(CMD_K_PREFIX));
+        if (val > 0 && val <= MAX_K_NEIGHBORS) {
             k_neighbors = val;
             printf("KNN K-neighbors set to: %d\n", k_neighbors);
         } else {
-            printf("Error: K must be between 1 and 10\n");
+            printf("Error: K must be between 1 and %d\n", MAX_K_NEIGHBORS);
         }
-      } else if (strncmp(line, "store ", 6) == 0) {
+      } else if (strncmp(line, CMD_STORE_PREFIX, strlen(CMD_STORE_PREFIX)) == 0) {
         if (current_mode != MODE_TRAIN) {
           printf("Error: Must be in TRAIN mode to store\n");
         } else {
           memset(store_label, 0, sizeof(store_label));
-          strncpy(store_label, line + 6, sizeof(store_label) - 1);
+          strncpy(store_label, line + strlen(CMD_STORE_PREFIX), sizeof(store_label) - 1);
           should_store = true;
         }
       } else {
         printf("Unknown command: %s. Type 'help' for available commands.\n", line);
       }
     }
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(LOOP_PERIOD_MS));
   }
 }
 
@@ -104,31 +99,31 @@ void app_main() {
   adc_oneshot_unit_init_cfg_t adcCfg = {
       .clk_src = ADC_RTC_CLK_SRC_DEFAULT,
       .ulp_mode = ADC_ULP_MODE_DISABLE,
-      .unit_id = ADC_UNIT_1,
+      .unit_id = ADC_UNIT,
   };
   adc_oneshot_chan_cfg_t channelCfg = {
-      .atten = ADC_ATTEN_DB_12,
-      .bitwidth = ADC_BITWIDTH_12,
+      .atten = ADC_ATTEN,
+      .bitwidth = ADC_BITWIDTH,
   };
   adc_oneshot_new_unit(&adcCfg, &adc);
   
   global_buffer = calloc(NUM_CHANNELS * BUFFER_SIZE, sizeof(int));
-  global_norm_buffer = heap_caps_aligned_alloc(16, NUM_CHANNELS * BUFFER_SIZE * sizeof(float), MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
+  global_norm_buffer = heap_caps_aligned_alloc(MEMORY_ALIGNMENT, NUM_CHANNELS * BUFFER_SIZE * sizeof(float), MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
   
   int min[NUM_CHANNELS], max[NUM_CHANNELS] = {0};
   for (int i = 0; i < NUM_CHANNELS; i++) {
     adc_oneshot_config_channel(adc, i, &channelCfg);
     int gpio;
-    adc_oneshot_channel_to_io(ADC_UNIT_1, i, &gpio);
+    adc_oneshot_channel_to_io(ADC_UNIT, i, &gpio);
     gpio_set_pull_mode(gpio, GPIO_PULLDOWN_ONLY);
-    min[i] = 4096;
+    min[i] = ADC_MAX_VALUE + 1;
   }
 
-  xTaskCreate(console_task, "console", 4096, NULL, 5, NULL);
+  xTaskCreate(console_task, "console", CONSOLE_TASK_STACK_SIZE, NULL, CONSOLE_TASK_PRIO, NULL);
 
   bool isDisabled = false;
   int inference_timer = 0;
-  float* linearized_norm_buf = heap_caps_aligned_alloc(16, NUM_CHANNELS * BUFFER_SIZE * sizeof(float), MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
+  float* linearized_norm_buf = heap_caps_aligned_alloc(MEMORY_ALIGNMENT, NUM_CHANNELS * BUFFER_SIZE * sizeof(float), MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
 
   while (1) {
     int current_raw[NUM_CHANNELS];

@@ -4,6 +4,7 @@
 #include <string.h>
 #include "esp_spiffs.h"
 #include "esp_log.h"
+#include "config.h"
 
 static const char* TAG = "STORAGE";
 
@@ -11,9 +12,9 @@ esp_err_t init_storage() {
     ESP_LOGI(TAG, "Initializing SPIFFS");
 
     esp_vfs_spiffs_conf_t conf = {
-      .base_path = "/spiffs",
+      .base_path = SPIFFS_BASE_PATH,
       .partition_label = "storage",
-      .max_files = 5,
+      .max_files = SPIFFS_MAX_FILES,
       .format_if_mount_failed = true
     };
 
@@ -48,8 +49,8 @@ void save_buffer_to_spiffs(const char* label, float* buffer, int num_channels, i
     }
 
     sample_record_t record;
-    strncpy(record.label, label, 15);
-    record.label[15] = '\0';
+    strncpy(record.label, label, MAX_LABEL_LENGTH - 1);
+    record.label[MAX_LABEL_LENGTH - 1] = '\0';
     memcpy(record.data, buffer, num_channels * buffer_size * sizeof(float));
 
     size_t written = fwrite(&record, sizeof(sample_record_t), 1, f);
@@ -75,8 +76,11 @@ void list_stored_buffers(int num_channels, int buffer_size) {
     while (fread(&record, sizeof(sample_record_t), 1, f) == 1) {
         printf("%d. Label: %s\n", ++count, record.label);
         // Print first few values of CH0 for verification
-        printf("  CH0 (first 5): %.2f, %.2f, %.2f, %.2f, %.2f\n", 
-               record.data[0], record.data[1], record.data[2], record.data[3], record.data[4]);
+        printf("  CH0 (first %d): ", DEBUG_PRINT_SAMPLES_COUNT);
+        for (int i = 0; i < DEBUG_PRINT_SAMPLES_COUNT; i++) {
+            printf("%.2f%s", record.data[i], (i == DEBUG_PRINT_SAMPLES_COUNT - 1) ? "" : ", ");
+        }
+        printf("\n");
     }
     printf("Total samples: %d\n", count);
     fclose(f);
