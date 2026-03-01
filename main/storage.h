@@ -3,27 +3,35 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include "esp_err.h"
+
+#define DATASET_PATH "/spiffs/dataset.bin"
 
 /**
- * @brief Saves the sensor buffer to NVS.
- * 
- * @param label The NVS key/label for the data.
- * @param buffer Pointer to the normalized float data buffer.
- * @param num_channels Number of channels in the buffer.
- * @param buffer_size Size of the buffer per channel.
+ * @brief Structure for a single data record in the binary file.
  */
-void save_buffer_to_nvs(const char* label, float* buffer, int num_channels, int buffer_size);
+typedef struct {
+    char label[16];
+    float data[5 * 32]; // Fixed size: NUM_CHANNELS * BUFFER_SIZE
+} sample_record_t;
 
 /**
- * @brief Lists all stored labels and their values in the NVS storage namespace.
- * 
- * @param num_channels Expected number of channels.
- * @param buffer_size Expected buffer size per channel.
+ * @brief Initializes the SPIFFS filesystem.
+ */
+esp_err_t init_storage();
+
+/**
+ * @brief Saves the sensor buffer to SPIFFS by appending.
+ */
+void save_buffer_to_spiffs(const char* label, float* buffer, int num_channels, int buffer_size);
+
+/**
+ * @brief Lists all stored labels in the SPIFFS dataset.
  */
 void list_stored_buffers(int num_channels, int buffer_size);
 
 /**
- * @brief Deletes all stored data in the storage namespace.
+ * @brief Deletes the dataset file.
  */
 void clear_stored_buffers();
 

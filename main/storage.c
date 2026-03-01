@@ -2,124 +2,90 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "nvs_flash.h"
-#include "nvs.h"
+#include "esp_spiffs.h"
 #include "esp_log.h"
 
 static const char* TAG = "STORAGE";
 
-typedef struct {
-    char label[16];
-    float data[]; // Flexible array member for the sensor data
-} sample_blob_t;
+esp_err_t init_storage() {
+    ESP_LOGI(TAG, "Initializing SPIFFS");
 
-void save_buffer_to_nvs(const char* label, float* buffer, int num_channels, int buffer_size) {
-  nvs_handle_t storage_handle, meta_handle;
-  esp_err_t err;
+    esp_vfs_spiffs_conf_t conf = {
+      .base_path = "/spiffs",
+      .partition_label = "storage",
+      .max_files = 5,
+      .format_if_mount_failed = true
+    };
 
-  // 1. Get or initialize the total sample count from 'meta' namespace
-  uint32_t total_samples = 0;
-  err = nvs_open("meta", NVS_READWRITE, &meta_handle);
-  if (err == ESP_OK) {
-    nvs_get_u32(meta_handle, "total", &total_samples);
-  } else {
-    ESP_LOGE(TAG, "Error opening meta namespace!");
-    return;
-  }
+    esp_err_t ret = esp_vfs_spiffs_register(&conf);
 
-  // 2. Prepare the sample blob
-  size_t data_size = num_channels * buffer_size * sizeof(float);
-  size_t total_blob_size = sizeof(sample_blob_t) + data_size;
-  sample_blob_t* blob = malloc(total_blob_size);
-  if (!blob) {
-    nvs_close(meta_handle);
-    return;
-  }
-  strncpy(blob->label, label, 15);
-  blob->label[15] = '\0';
-  memcpy(blob->data, buffer, data_size);
+    if (ret != ESP_OK) {
+        if (ret == ESP_FAIL) {
+            ESP_LOGE(TAG, "Failed to mount or format filesystem");
+        } else if (ret == ESP_ERR_NOT_FOUND) {
+            ESP_LOGE(TAG, "Failed to find SPIFFS partition");
+        } else {
+            ESP_LOGE(TAG, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
+        }
+        return ret;
+    }
 
-  // 3. Save to 'storage' namespace with a unique key
-  err = nvs_open("storage", NVS_READWRITE, &storage_handle);
-  if (err != ESP_OK) {
-    free(blob);
-    nvs_close(meta_handle);
-    return;
-  }
+    size_t total = 0, used = 0;
+    ret = esp_spiffs_info(conf.partition_label, &total, &used);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get SPIFFS partition information (%s)", esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "Partition size: total: %d, used: %d", total, used);
+    }
+    return ESP_OK;
+}
 
-  char key[16];
-  snprintf(key, sizeof(key), "s%lu", (unsigned long)total_samples);
-  
-  err = nvs_set_blob(storage_handle, key, blob, total_blob_size);
-  if (err == ESP_OK) {
-    nvs_commit(storage_handle);
-    
-    // Update counter
-    total_samples++;
-    nvs_set_u32(meta_handle, "total", total_samples);
-    nvs_commit(meta_handle);
-    
-    ESP_LOGI(TAG, "Stored sample %lu with label: %s", (unsigned long)total_samples - 1, label);
-  } else {
-    ESP_LOGE(TAG, "Failed to store blob: %s", esp_err_to_name(err));
-  }
+void save_buffer_to_spiffs(const char* label, float* buffer, int num_channels, int buffer_size) {
+    FILE* f = fopen(DATASET_PATH, "ab"); // Open for appending in binary mode
+    if (f == NULL) {
+        ESP_LOGE(TAG, "Failed to open file for writing");
+        return;
+    }
 
-  free(blob);
-  nvs_close(storage_handle);
-  nvs_close(meta_handle);
+    sample_record_t record;
+    strncpy(record.label, label, 15);
+    record.label[15] = '\0';
+    memcpy(record.data, buffer, num_channels * buffer_size * sizeof(float));
+
+    size_t written = fwrite(&record, sizeof(sample_record_t), 1, f);
+    if (written != 1) {
+        ESP_LOGE(TAG, "Error writing record to file");
+    } else {
+        ESP_LOGI(TAG, "Sample stored successfully: %s", label);
+    }
+
+    fclose(f);
 }
 
 void list_stored_buffers(int num_channels, int buffer_size) {
-  nvs_iterator_t it = NULL;
-  esp_err_t err = nvs_entry_find(NVS_DEFAULT_PART_NAME, "storage", NVS_TYPE_BLOB, &it);
-  if (err == ESP_ERR_NVS_NOT_FOUND) {
-    printf("No stored items found.\n");
-    return;
-  }
-
-  nvs_handle_t my_handle;
-  nvs_open("storage", NVS_READONLY, &my_handle);
-
-  printf("Stored items:\n");
-  while (it != NULL) {
-    nvs_entry_info_t info;
-    nvs_entry_info(it, &info);
-
-    size_t required_size = 0;
-    nvs_get_blob(my_handle, info.key, NULL, &required_size);
-    if (required_size > 0) {
-      sample_blob_t* blob = malloc(required_size);
-      if (blob) {
-        if (nvs_get_blob(my_handle, info.key, blob, &required_size) == ESP_OK) {
-          printf("Key: %s, Label: %s\n", info.key, blob->label);
-          for (int ch = 0; ch < num_channels; ch++) {
-            printf("  CH%d: ", ch);
-            for (int i = 0; i < buffer_size; i++) {
-              printf("%.2f%s", blob->data[ch * buffer_size + i], (i == buffer_size - 1) ? "" : ",");
-            }
-            printf("\n");
-          }
-        }
-        free(blob);
-      }
+    FILE* f = fopen(DATASET_PATH, "rb");
+    if (f == NULL) {
+        printf("No dataset found or failed to open file.\n");
+        return;
     }
-    err = nvs_entry_next(&it);
-    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) break;
-  }
-  nvs_close(my_handle);
+
+    sample_record_t record;
+    int count = 0;
+    printf("Stored items in dataset:\n");
+    while (fread(&record, sizeof(sample_record_t), 1, f) == 1) {
+        printf("%d. Label: %s\n", ++count, record.label);
+        // Print first few values of CH0 for verification
+        printf("  CH0 (first 5): %.2f, %.2f, %.2f, %.2f, %.2f\n", 
+               record.data[0], record.data[1], record.data[2], record.data[3], record.data[4]);
+    }
+    printf("Total samples: %d\n", count);
+    fclose(f);
 }
 
 void clear_stored_buffers() {
-    nvs_handle_t h;
-    if (nvs_open("storage", NVS_READWRITE, &h) == ESP_OK) {
-        nvs_erase_all(h);
-        nvs_commit(h);
-        nvs_close(h);
+    if (remove(DATASET_PATH) == 0) {
+        printf("Dataset deleted successfully.\n");
+    } else {
+        printf("No dataset file to delete or error occurred.\n");
     }
-    if (nvs_open("meta", NVS_READWRITE, &h) == ESP_OK) {
-        nvs_set_u32(h, "total", 0);
-        nvs_commit(h);
-        nvs_close(h);
-    }
-    printf("All stored data and counters cleared permanently.\n");
 }

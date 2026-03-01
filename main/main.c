@@ -35,14 +35,14 @@ static char store_label[16] = {0};
 static int k_neighbors = 3;
 
 void show_help() {
-    printf("\n=== ESP-Ossicoloscope Help ===\n");
+    printf("\n=== ESP-Ossicoloscope Help (File-Based Storage) ===\n");
     printf("Commands:\n");
     printf("  help          - Show this help message\n");
     printf("  mode train    - Switch to Training Mode\n");
     printf("  mode infer    - Switch to Inference Mode (KNN)\n");
-    printf("  store <label> - Save current preprocessed buffer to NVS (Train mode only)\n");
-    printf("  list          - List all stored labels and their values\n");
-    printf("  clear         - Permanently delete all stored data from NVS\n");
+    printf("  store <label> - Append current preprocessed buffer to dataset file\n");
+    printf("  list          - List all stored records in dataset file\n");
+    printf("  clear         - Permanently delete the dataset file\n");
     printf("  k <number>    - Set number of neighbors for KNN (Current: %d)\n", k_neighbors);
     printf("==============================\n");
 }
@@ -89,13 +89,16 @@ void console_task(void* arg) {
 }
 
 void app_main() {
-  // Initialize NVS
+  // Initialize NVS (still needed for system/wifi components)
   esp_err_t ret = nvs_flash_init();
   if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
     ESP_ERROR_CHECK(nvs_flash_erase());
     ret = nvs_flash_init();
   }
   ESP_ERROR_CHECK(ret);
+
+  // Initialize File System Storage
+  ESP_ERROR_CHECK(init_storage());
 
   adc_oneshot_unit_handle_t adc;
   adc_oneshot_unit_init_cfg_t adcCfg = {
@@ -152,16 +155,7 @@ void app_main() {
                   linearized_norm_buf[ch * BUFFER_SIZE + i] = global_norm_buffer[ch * BUFFER_SIZE + buf_idx];
               }
           }
-          
-          int64_t start_time = esp_timer_get_time();
-          run_knn_inference(linearized_norm_buf, NUM_CHANNELS, BUFFER_SIZE, k_neighbors, 0); // Temporary 0
-          int64_t end_time = esp_timer_get_time();
-          
-          // Re-running with correct duration for the print report inside the function
-          // Alternatively, we can pass it or print outside. Let's fix the report to take the measurement.
-          // Note: Measuring ONLY the core KNN logic inside run_knn_inference might be better.
-          // I will update run_knn_inference to measure its own duration internally for more accuracy.
-          
+          run_knn_inference(linearized_norm_buf, NUM_CHANNELS, BUFFER_SIZE, k_neighbors, 0);
           inference_timer = 0;
       }
     }
@@ -173,7 +167,7 @@ void app_main() {
               linearized_norm_buf[ch * BUFFER_SIZE + i] = global_norm_buffer[ch * BUFFER_SIZE + buf_idx];
           }
       }
-      save_buffer_to_nvs(store_label, linearized_norm_buf, NUM_CHANNELS, BUFFER_SIZE);
+      save_buffer_to_spiffs(store_label, linearized_norm_buf, NUM_CHANNELS, BUFFER_SIZE);
       should_store = false;
     }
 
