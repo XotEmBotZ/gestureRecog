@@ -9,6 +9,7 @@
 #include "freertos/task.h"
 #include "nvs_flash.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_heap_caps.h"
 
 #include "lib.h"
@@ -31,13 +32,29 @@ static float* global_norm_buffer = NULL;
 static int global_idx = 0;
 static bool should_store = false;
 static char store_label[16] = {0};
+static int k_neighbors = 3;
+
+void show_help() {
+    printf("\n=== ESP-Ossicoloscope Help ===\n");
+    printf("Commands:\n");
+    printf("  help          - Show this help message\n");
+    printf("  mode train    - Switch to Training Mode\n");
+    printf("  mode infer    - Switch to Inference Mode (KNN)\n");
+    printf("  store <label> - Save current preprocessed buffer to NVS (Train mode only)\n");
+    printf("  list          - List all stored labels and their values\n");
+    printf("  clear         - Permanently delete all stored data from NVS\n");
+    printf("  k <number>    - Set number of neighbors for KNN (Current: %d)\n", k_neighbors);
+    printf("==============================\n");
+}
 
 void console_task(void* arg) {
   char line[64];
   while (1) {
     if (fgets(line, sizeof(line), stdin)) {
       line[strcspn(line, "\n")] = 0; // Remove newline
-      if (strcmp(line, "mode train") == 0) {
+      if (strcmp(line, "help") == 0) {
+        show_help();
+      } else if (strcmp(line, "mode train") == 0) {
         current_mode = MODE_TRAIN;
         printf("Switched to TRAIN mode\n");
       } else if (strcmp(line, "mode infer") == 0) {
@@ -45,6 +62,16 @@ void console_task(void* arg) {
         printf("Switched to INFER mode\n");
       } else if (strcmp(line, "list") == 0) {
         list_stored_buffers(NUM_CHANNELS, BUFFER_SIZE);
+      } else if (strcmp(line, "clear") == 0) {
+        clear_stored_buffers();
+      } else if (strncmp(line, "k ", 2) == 0) {
+        int val = atoi(line + 2);
+        if (val > 0 && val <= 10) {
+            k_neighbors = val;
+            printf("KNN K-neighbors set to: %d\n", k_neighbors);
+        } else {
+            printf("Error: K must be between 1 and 10\n");
+        }
       } else if (strncmp(line, "store ", 6) == 0) {
         if (current_mode != MODE_TRAIN) {
           printf("Error: Must be in TRAIN mode to store\n");
@@ -54,8 +81,7 @@ void console_task(void* arg) {
           should_store = true;
         }
       } else {
-        printf("Unknown command: %s\n", line);
-        printf("Available: mode train, mode infer, store <label>, list\n");
+        printf("Unknown command: %s. Type 'help' for available commands.\n", line);
       }
     }
     vTaskDelay(pdMS_TO_TICKS(100));
@@ -84,7 +110,6 @@ void app_main() {
   adc_oneshot_new_unit(&adcCfg, &adc);
   
   global_buffer = calloc(NUM_CHANNELS * BUFFER_SIZE, sizeof(int));
-  // 16-byte alignment for S3 SIMD
   global_norm_buffer = heap_caps_aligned_alloc(16, NUM_CHANNELS * BUFFER_SIZE * sizeof(float), MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
   
   int min[NUM_CHANNELS], max[NUM_CHANNELS] = {0};
@@ -100,31 +125,55 @@ void app_main() {
 
   bool isDisabled = false;
   int inference_timer = 0;
+  float* linearized_norm_buf = heap_caps_aligned_alloc(16, NUM_CHANNELS * BUFFER_SIZE * sizeof(float), MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
 
   while (1) {
+    int current_raw[NUM_CHANNELS];
     for (int i = 0; i < NUM_CHANNELS; i++) {
-      adc_oneshot_read(adc, i, global_buffer + i * BUFFER_SIZE + global_idx);
+      adc_oneshot_read(adc, i, &current_raw[i]);
+      global_buffer[i * BUFFER_SIZE + global_idx] = current_raw[i];
     }
     
-    // Always perform min/max calculation and normalization for consistent preprocessing
     setMinMax(global_buffer, NUM_CHANNELS, BUFFER_SIZE, min, max, &isDisabled, DISABLE_THRESHOLD);
-    normalize_buffer(global_buffer, global_norm_buffer, global_idx, NUM_CHANNELS, BUFFER_SIZE, min, max);
 
-    // Always print results for debug (works in both TRAIN and INFER modes)
-    printRes(global_buffer, global_idx, NUM_CHANNELS, BUFFER_SIZE, min, max);
+    for (int i = 0; i < NUM_CHANNELS; i++) {
+        float proc = preprocess_sample(current_raw[i], min[i], max[i]);
+        global_norm_buffer[i * BUFFER_SIZE + global_idx] = proc;
+        printRes(current_raw[i], proc, i, min[i], max[i]);
+    }
     printf(">d:%d mode:%s\n", isDisabled, (current_mode == MODE_TRAIN) ? "TRAIN" : "INFER");
 
     if (current_mode == MODE_INFER) {
       inference_timer += LOOP_PERIOD_MS;
       if (inference_timer >= INFERENCE_INTERVAL_MS) {
-          run_knn_inference(global_norm_buffer, NUM_CHANNELS, BUFFER_SIZE, 3);
+          for (int ch = 0; ch < NUM_CHANNELS; ch++) {
+              for (int i = 0; i < BUFFER_SIZE; i++) {
+                  int buf_idx = (global_idx + 1 + i) % BUFFER_SIZE;
+                  linearized_norm_buf[ch * BUFFER_SIZE + i] = global_norm_buffer[ch * BUFFER_SIZE + buf_idx];
+              }
+          }
+          
+          int64_t start_time = esp_timer_get_time();
+          run_knn_inference(linearized_norm_buf, NUM_CHANNELS, BUFFER_SIZE, k_neighbors, 0); // Temporary 0
+          int64_t end_time = esp_timer_get_time();
+          
+          // Re-running with correct duration for the print report inside the function
+          // Alternatively, we can pass it or print outside. Let's fix the report to take the measurement.
+          // Note: Measuring ONLY the core KNN logic inside run_knn_inference might be better.
+          // I will update run_knn_inference to measure its own duration internally for more accuracy.
+          
           inference_timer = 0;
       }
     }
 
     if (should_store) {
-      // Store the already preprocessed (normalized) buffer
-      save_buffer_to_nvs(store_label, global_norm_buffer, NUM_CHANNELS, BUFFER_SIZE);
+      for (int ch = 0; ch < NUM_CHANNELS; ch++) {
+          for (int i = 0; i < BUFFER_SIZE; i++) {
+              int buf_idx = (global_idx + 1 + i) % BUFFER_SIZE;
+              linearized_norm_buf[ch * BUFFER_SIZE + i] = global_norm_buffer[ch * BUFFER_SIZE + buf_idx];
+          }
+      }
+      save_buffer_to_nvs(store_label, linearized_norm_buf, NUM_CHANNELS, BUFFER_SIZE);
       should_store = false;
     }
 

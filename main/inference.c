@@ -111,7 +111,7 @@ void run_knn_inference(float* current_norm_buffer, int num_channels, int buffer_
 
     if (samples_checked > 0) {
         printf("\n=== KNN INFERENCE REPORT ===\n");
-        printf("Time taken: %lld us\n", duration_us);
+        printf(">time:%lld\n", duration_us);
         printf("Samples Processed: %d\n", samples_checked);
         printf("Best Match: [%s] (Dist: %.2f)\n", top_k[0].label, top_k[0].distance);
         printf("---------------------------\n");
