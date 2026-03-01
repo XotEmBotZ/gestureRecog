@@ -8,12 +8,11 @@
  * @brief Saves the sensor buffer to NVS.
  * 
  * @param label The NVS key/label for the data.
- * @param buffer Pointer to the data buffer.
- * @param idx Current index in the circular buffer.
+ * @param buffer Pointer to the normalized float data buffer.
  * @param num_channels Number of channels in the buffer.
  * @param buffer_size Size of the buffer per channel.
  */
-void save_buffer_to_nvs(const char* label, int* buffer, int idx, int num_channels, int buffer_size);
+void save_buffer_to_nvs(const char* label, float* buffer, int num_channels, int buffer_size);
 
 /**
  * @brief Lists all stored labels and their values in the NVS storage namespace.
