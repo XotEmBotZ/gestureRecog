@@ -1,5 +1,6 @@
 #include <stdbool.h>
 #include <stdio.h>
+#include "lib.h"
 
 void setMinMax(int* buffer, int channel, int bufferSize, int* min, int* max,
                bool* isDisabled, int disableThreshold) {
