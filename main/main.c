@@ -9,6 +9,7 @@
 #include "freertos/task.h"
 #include "nvs_flash.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 
 #include "lib.h"
 #include "storage.h"
@@ -26,6 +27,7 @@ typedef enum { MODE_INFER, MODE_TRAIN } app_mode_t;
 static const char* TAG = "APP";
 static app_mode_t current_mode = MODE_INFER;
 static int* global_buffer = NULL;
+static float* global_norm_buffer = NULL;
 static int global_idx = 0;
 static bool should_store = false;
 static char store_label[16] = {0};
@@ -82,6 +84,9 @@ void app_main() {
   adc_oneshot_new_unit(&adcCfg, &adc);
   
   global_buffer = calloc(NUM_CHANNELS * BUFFER_SIZE, sizeof(int));
+  // 16-byte alignment for S3 SIMD
+  global_norm_buffer = heap_caps_aligned_alloc(16, NUM_CHANNELS * BUFFER_SIZE * sizeof(float), MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
+  
   int min[NUM_CHANNELS], max[NUM_CHANNELS] = {0};
   for (int i = 0; i < NUM_CHANNELS; i++) {
     adc_oneshot_config_channel(adc, i, &channelCfg);
@@ -101,23 +106,25 @@ void app_main() {
       adc_oneshot_read(adc, i, global_buffer + i * BUFFER_SIZE + global_idx);
     }
     
+    // Always perform min/max calculation and normalization for consistent preprocessing
+    setMinMax(global_buffer, NUM_CHANNELS, BUFFER_SIZE, min, max, &isDisabled, DISABLE_THRESHOLD);
+    normalize_buffer(global_buffer, global_norm_buffer, global_idx, NUM_CHANNELS, BUFFER_SIZE, min, max);
+
+    // Always print results for debug (works in both TRAIN and INFER modes)
+    printRes(global_buffer, global_idx, NUM_CHANNELS, BUFFER_SIZE, min, max);
+    printf(">d:%d mode:%s\n", isDisabled, (current_mode == MODE_TRAIN) ? "TRAIN" : "INFER");
+
     if (current_mode == MODE_INFER) {
-      setMinMax(global_buffer, NUM_CHANNELS, BUFFER_SIZE, min, max, &isDisabled, DISABLE_THRESHOLD);
-      
       inference_timer += LOOP_PERIOD_MS;
       if (inference_timer >= INFERENCE_INTERVAL_MS) {
-          run_knn_inference(global_buffer, NUM_CHANNELS, BUFFER_SIZE, 3);
+          run_knn_inference(global_norm_buffer, NUM_CHANNELS, BUFFER_SIZE, 3);
           inference_timer = 0;
       }
-
-      printRes(global_buffer, global_idx, NUM_CHANNELS, BUFFER_SIZE, min, max);
-      printf(">d:%d\n", isDisabled);
-    } else {
-      printf(">mode:TRAIN idx:%d\n", global_idx);
     }
 
     if (should_store) {
-      save_buffer_to_nvs(store_label, global_buffer, global_idx, NUM_CHANNELS, BUFFER_SIZE);
+      // Store the already preprocessed (normalized) buffer
+      save_buffer_to_nvs(store_label, global_norm_buffer, NUM_CHANNELS, BUFFER_SIZE);
       should_store = false;
     }
 

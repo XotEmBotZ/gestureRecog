@@ -21,7 +21,7 @@ typedef struct {
 // Structure to hold a batch of samples in memory
 typedef struct {
     char labels[BATCH_SIZE][16];
-    int* data; // Contiguous block of data for BATCH_SIZE samples
+    float* data; // Contiguous block of data for BATCH_SIZE float samples
     int count;
 } sample_batch_t;
 
@@ -44,7 +44,7 @@ static void update_top_k(knn_match_t* top_k, int k, const char* label, float dis
     }
 }
 
-void run_knn_inference(int* current_buffer, int num_channels, int buffer_size, int k) {
+void run_knn_inference(float* current_norm_buffer, int num_channels, int buffer_size, int k) {
     nvs_iterator_t it = NULL;
     esp_err_t err = nvs_entry_find(NVS_DEFAULT_PART_NAME, "storage", NVS_TYPE_BLOB, &it);
     if (err == ESP_ERR_NVS_NOT_FOUND) {
@@ -72,36 +72,24 @@ void run_knn_inference(int* current_buffer, int num_channels, int buffer_size, i
     }
 
     int samples_checked = 0;
-    size_t sample_size_ints = num_channels * buffer_size;
-    size_t sample_size_bytes = sample_size_ints * sizeof(int);
+    size_t sample_size_floats = num_channels * buffer_size;
+    size_t sample_size_bytes = sample_size_floats * sizeof(float);
 
-    // Prepare float buffers for ESP-DSP SIMD operations
-    // Using 16-byte alignment which is required for ESP32-S3 PIE (Vector) instructions
-    float* current_f = heap_caps_aligned_alloc(16, sample_size_ints * sizeof(float), MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
-    float* stored_f = heap_caps_aligned_alloc(16, sample_size_ints * sizeof(float), MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
-    float* diff_f = heap_caps_aligned_alloc(16, sample_size_ints * sizeof(float), MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
-
-    if (!current_f || !stored_f || !diff_f) {
-        ESP_LOGE(TAG, "Failed to allocate float buffers for SIMD acceleration");
-        if (current_f) heap_caps_free(current_f);
-        if (stored_f) heap_caps_free(stored_f);
-        if (diff_f) heap_caps_free(diff_f);
+    // Aligned buffer for SIMD difference calculation
+    float* diff_f = heap_caps_aligned_alloc(16, sample_size_bytes, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
+    if (!diff_f) {
+        ESP_LOGE(TAG, "Failed to allocate diff buffer");
         nvs_close(my_handle);
         free(top_k);
         return;
     }
 
-    // Convert current buffer to float once
-    for (int i = 0; i < sample_size_ints; i++) {
-        current_f[i] = (float)current_buffer[i];
-    }
-
-    // Pre-allocate a batch buffer for integer data from NVS
+    // Pre-allocate a batch buffer for float data from NVS
     sample_batch_t batch;
     batch.data = malloc(sample_size_bytes * BATCH_SIZE);
     if (!batch.data) {
         ESP_LOGE(TAG, "Failed to allocate batch buffer");
-        heap_caps_free(current_f); heap_caps_free(stored_f); heap_caps_free(diff_f);
+        heap_caps_free(diff_f);
         nvs_close(my_handle);
         free(top_k);
         return;
@@ -117,7 +105,7 @@ void run_knn_inference(int* current_buffer, int num_channels, int buffer_size, i
             nvs_get_blob(my_handle, info.key, NULL, &required_size);
             
             if (required_size == sample_size_bytes) {
-                if (nvs_get_blob(my_handle, info.key, batch.data + (batch.count * sample_size_ints), &required_size) == ESP_OK) {
+                if (nvs_get_blob(my_handle, info.key, batch.data + (batch.count * sample_size_floats), &required_size) == ESP_OK) {
                     strncpy(batch.labels[batch.count], info.key, 15);
                     batch.labels[batch.count][15] = '\0';
                     batch.count++;
@@ -128,22 +116,15 @@ void run_knn_inference(int* current_buffer, int num_channels, int buffer_size, i
         }
 
         for (int b = 0; b < batch.count; b++) {
-            int* stored_int_sample = batch.data + (b * sample_size_ints);
-            
-            // Convert stored sample to float for DSP
-            for (int i = 0; i < sample_size_ints; i++) {
-                stored_f[i] = (float)stored_int_sample[i];
-            }
+            float* stored_norm_sample = batch.data + (b * sample_size_floats);
 
             // --- ESP32-S3 SIMD ACCELERATED DISTANCE CALCULATION ---
             // 1. Vector Subtraction: diff = current - stored
-            // dsps_sub_f32 uses SIMD instructions when compiled for ESP32-S3
-            dsps_sub_f32(current_f, stored_f, diff_f, sample_size_ints, 1, 1, 1);
+            dsps_sub_f32(current_norm_buffer, stored_norm_sample, diff_f, sample_size_floats, 1, 1, 1);
             
             // 2. Dot Product: sum_sq_diff = diff . diff (Sum of squared differences)
-            // This leverages the ESP32-S3 PIE (Processor Instruction Extensions)
             float sum_sq_diff = 0;
-            dsps_dotprod_f32(diff_f, diff_f, &sum_sq_diff, sample_size_ints);
+            dsps_dotprod_f32(diff_f, diff_f, &sum_sq_diff, sample_size_floats);
             
             // 3. Final Square Root
             float dist = sqrtf(sum_sq_diff);
@@ -171,8 +152,6 @@ void run_knn_inference(int* current_buffer, int num_channels, int buffer_size, i
     }
 
     free(batch.data);
-    heap_caps_free(current_f);
-    heap_caps_free(stored_f);
     heap_caps_free(diff_f);
     nvs_close(my_handle);
     free(top_k);
