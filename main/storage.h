@@ -22,4 +22,9 @@ void save_buffer_to_nvs(const char* label, float* buffer, int num_channels, int 
  */
 void list_stored_buffers(int num_channels, int buffer_size);
 
+/**
+ * @brief Deletes all stored data in the storage namespace.
+ */
+void clear_stored_buffers();
+
 #endif // STORAGE_H

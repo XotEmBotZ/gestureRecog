@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #include "esp_dsp.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 
 static const char* TAG = "INFERENCE";
 
@@ -18,12 +19,11 @@ typedef struct {
     float distance;
 } knn_match_t;
 
-// Structure to hold a batch of samples in memory
+// This must match the structure in storage.c
 typedef struct {
-    char labels[BATCH_SIZE][16];
-    float* data; // Contiguous block of data for BATCH_SIZE float samples
-    int count;
-} sample_batch_t;
+    char label[16];
+    float data[]; 
+} sample_blob_t;
 
 // Simple bubble sort to maintain top K matches
 static void update_top_k(knn_match_t* top_k, int k, const char* label, float distance) {
@@ -44,7 +44,9 @@ static void update_top_k(knn_match_t* top_k, int k, const char* label, float dis
     }
 }
 
-void run_knn_inference(float* current_norm_buffer, int num_channels, int buffer_size, int k) {
+void run_knn_inference(float* current_norm_buffer, int num_channels, int buffer_size, int k, int64_t _unused) {
+    int64_t start_time = esp_timer_get_time();
+    
     nvs_iterator_t it = NULL;
     esp_err_t err = nvs_entry_find(NVS_DEFAULT_PART_NAME, "storage", NVS_TYPE_BLOB, &it);
     if (err == ESP_ERR_NVS_NOT_FOUND) {
@@ -52,15 +54,9 @@ void run_knn_inference(float* current_norm_buffer, int num_channels, int buffer_
         return;
     }
 
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Error searching NVS: %s", esp_err_to_name(err));
-        return;
-    }
-
     nvs_handle_t my_handle;
     err = nvs_open("storage", NVS_READONLY, &my_handle);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Error opening NVS handle: %s", esp_err_to_name(err));
         nvs_release_iterator(it);
         return;
     }
@@ -74,69 +70,48 @@ void run_knn_inference(float* current_norm_buffer, int num_channels, int buffer_
     int samples_checked = 0;
     size_t sample_size_floats = num_channels * buffer_size;
     size_t sample_size_bytes = sample_size_floats * sizeof(float);
+    size_t expected_blob_size = sizeof(sample_blob_t) + sample_size_bytes;
 
     // Aligned buffer for SIMD difference calculation
     float* diff_f = heap_caps_aligned_alloc(16, sample_size_bytes, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
-    if (!diff_f) {
-        ESP_LOGE(TAG, "Failed to allocate diff buffer");
-        nvs_close(my_handle);
-        free(top_k);
-        return;
-    }
-
-    // Pre-allocate a batch buffer for float data from NVS
-    sample_batch_t batch;
-    batch.data = malloc(sample_size_bytes * BATCH_SIZE);
-    if (!batch.data) {
-        ESP_LOGE(TAG, "Failed to allocate batch buffer");
-        heap_caps_free(diff_f);
-        nvs_close(my_handle);
-        free(top_k);
-        return;
-    }
-
+    
     while (it != NULL) {
-        batch.count = 0;
+        // Load and process one by one (easier with the variable blob labels)
+        // Batching can be re-added if we optimize the storage further, 
+        // but for now let's ensure correctness with the new multi-label format.
+        nvs_entry_info_t info;
+        nvs_entry_info(it, &info);
+
+        size_t required_size = 0;
+        nvs_get_blob(my_handle, info.key, NULL, &required_size);
         
-        while (it != NULL && batch.count < BATCH_SIZE) {
-            nvs_entry_info_t info;
-            nvs_entry_info(it, &info);
-            size_t required_size = 0;
-            nvs_get_blob(my_handle, info.key, NULL, &required_size);
-            
-            if (required_size == sample_size_bytes) {
-                if (nvs_get_blob(my_handle, info.key, batch.data + (batch.count * sample_size_floats), &required_size) == ESP_OK) {
-                    strncpy(batch.labels[batch.count], info.key, 15);
-                    batch.labels[batch.count][15] = '\0';
-                    batch.count++;
+        if (required_size == expected_blob_size) {
+            sample_blob_t* blob = malloc(required_size);
+            if (blob) {
+                if (nvs_get_blob(my_handle, info.key, blob, &required_size) == ESP_OK) {
+                    // --- ESP32-S3 SIMD ACCELERATED DISTANCE CALCULATION ---
+                    dsps_sub_f32(current_norm_buffer, blob->data, diff_f, sample_size_floats, 1, 1, 1);
+                    float sum_sq_diff = 0;
+                    dsps_dotprod_f32(diff_f, diff_f, &sum_sq_diff, sample_size_floats);
+                    float dist = sqrtf(sum_sq_diff);
+                    // -----------------------------------------------------
+
+                    update_top_k(top_k, k, blob->label, dist);
+                    samples_checked++;
                 }
+                free(blob);
             }
-            err = nvs_entry_next(&it);
-            if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) break;
         }
 
-        for (int b = 0; b < batch.count; b++) {
-            float* stored_norm_sample = batch.data + (b * sample_size_floats);
-
-            // --- ESP32-S3 SIMD ACCELERATED DISTANCE CALCULATION ---
-            // 1. Vector Subtraction: diff = current - stored
-            dsps_sub_f32(current_norm_buffer, stored_norm_sample, diff_f, sample_size_floats, 1, 1, 1);
-            
-            // 2. Dot Product: sum_sq_diff = diff . diff (Sum of squared differences)
-            float sum_sq_diff = 0;
-            dsps_dotprod_f32(diff_f, diff_f, &sum_sq_diff, sample_size_floats);
-            
-            // 3. Final Square Root
-            float dist = sqrtf(sum_sq_diff);
-            // -----------------------------------------------------
-
-            update_top_k(top_k, k, batch.labels[b], dist);
-            samples_checked++;
-        }
+        err = nvs_entry_next(&it);
+        if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) break;
     }
+
+    int64_t duration_us = esp_timer_get_time() - start_time;
 
     if (samples_checked > 0) {
-        printf("\n=== KNN INFERENCE REPORT (S3 SIMD ACCELERATED) ===\n");
+        printf("\n=== KNN INFERENCE REPORT ===\n");
+        printf("Time taken: %lld us\n", duration_us);
         printf("Samples Processed: %d\n", samples_checked);
         printf("Best Match: [%s] (Dist: %.2f)\n", top_k[0].label, top_k[0].distance);
         printf("---------------------------\n");
@@ -151,7 +126,6 @@ void run_knn_inference(float* current_norm_buffer, int num_channels, int buffer_
         printf("KNN: No valid samples found for comparison.\n");
     }
 
-    free(batch.data);
     heap_caps_free(diff_f);
     nvs_close(my_handle);
     free(top_k);
