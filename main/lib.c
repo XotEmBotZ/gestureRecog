@@ -2,22 +2,6 @@
 #include <stdio.h>
 #include "lib.h"
 
-void setMinMax(int* buffer, int channel, int bufferSize, int* min, int* max,
-               bool* isDisabled, int disableThreshold) {
-  *isDisabled = false;
-  for (int i = 0; i < channel; i++) {
-    min[i] = 4096;
-    max[i] = 0;
-    for (int j = 0; j < bufferSize; j++) {
-      if (*(buffer + i * bufferSize + j) < min[i])
-        min[i] = *(buffer + i * bufferSize + j);
-      if (*(buffer + i * bufferSize + j) > max[i])
-        max[i] = *(buffer + i * bufferSize + j);
-    }
-    if (!((max[i] - min[i]) >= disableThreshold)) *isDisabled = true;
-  }
-}
-
 void printRes(int* buffer, int idx, int channel, int bufferSize, int* min,
               int* max) {
   for (int i = 0; i < channel; i++) {

@@ -16,5 +16,6 @@
     "--query-driver=**",
     "--compile-commands-dir=/home/xotem/projects/ESP-Ossicoloscope/build"
   ],
-  "idf.flashType": "UART"
+  "idf.flashType": "UART",
+  "idf.currentSetup": "/home/xotem/esp/v5.5.2/esp-idf"
 }

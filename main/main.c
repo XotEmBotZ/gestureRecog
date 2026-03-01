@@ -1,5 +1,6 @@
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "driver/gpio.h"
@@ -7,12 +8,18 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
-#include "nvs.h"
 #include "esp_log.h"
-#include "lib.h"
 
+#include "lib.h"
+#include "storage.h"
+#include "preprocess.h"
+#include "inference.h"
+
+#define NUM_CHANNELS 5
 #define BUFFER_SIZE 32
 #define DISABLE_THRESHOLD 20
+#define INFERENCE_INTERVAL_MS 1000
+#define LOOP_PERIOD_MS 100
 
 typedef enum { MODE_INFER, MODE_TRAIN } app_mode_t;
 
@@ -22,45 +29,6 @@ static int* global_buffer = NULL;
 static int global_idx = 0;
 static bool should_store = false;
 static char store_label[16] = {0};
-
-void save_buffer_to_nvs(const char* label, int* buffer, int idx) {
-  nvs_handle_t my_handle;
-  esp_err_t err = nvs_open("storage", NVS_READWRITE, &my_handle);
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "Error (%s) opening NVS handle!", esp_err_to_name(err));
-    return;
-  }
-
-  // Create a linear copy of the buffer based on current idx
-  // We want the most recent readings at the end
-  size_t data_size = 5 * BUFFER_SIZE * sizeof(int);
-  int* linear_buf = malloc(data_size);
-  if (linear_buf == NULL) {
-    nvs_close(my_handle);
-    return;
-  }
-
-  for (int ch = 0; ch < 5; ch++) {
-    for (int i = 0; i < BUFFER_SIZE; i++) {
-      // The value at (idx + 1 + i) % BUFFER_SIZE is the i-th oldest reading
-      int buffer_idx = (idx + 1 + i) % BUFFER_SIZE;
-      linear_buf[ch * BUFFER_SIZE + i] = buffer[ch * BUFFER_SIZE + buffer_idx];
-    }
-  }
-
-  err = nvs_set_blob(my_handle, label, linear_buf, data_size);
-  if (err == ESP_OK) {
-    err = nvs_commit(my_handle);
-    if (err == ESP_OK) {
-      ESP_LOGI(TAG, "Successfully stored buffer with label: %s", label);
-    }
-  } else {
-    ESP_LOGE(TAG, "Failed to store blob: %s", esp_err_to_name(err));
-  }
-
-  nvs_close(my_handle);
-  free(linear_buf);
-}
 
 void console_task(void* arg) {
   char line[64];
@@ -73,6 +41,8 @@ void console_task(void* arg) {
       } else if (strcmp(line, "mode infer") == 0) {
         current_mode = MODE_INFER;
         printf("Switched to INFER mode\n");
+      } else if (strcmp(line, "list") == 0) {
+        list_stored_buffers(NUM_CHANNELS, BUFFER_SIZE);
       } else if (strncmp(line, "store ", 6) == 0) {
         if (current_mode != MODE_TRAIN) {
           printf("Error: Must be in TRAIN mode to store\n");
@@ -83,7 +53,7 @@ void console_task(void* arg) {
         }
       } else {
         printf("Unknown command: %s\n", line);
-        printf("Available: mode train, mode infer, store <label>\n");
+        printf("Available: mode train, mode infer, store <label>, list\n");
       }
     }
     vTaskDelay(pdMS_TO_TICKS(100));
@@ -111,9 +81,9 @@ void app_main() {
   };
   adc_oneshot_new_unit(&adcCfg, &adc);
   
-  global_buffer = calloc(5 * BUFFER_SIZE, sizeof(int));
-  int min[5], max[5] = {0};
-  for (int i = 0; i < 5; i++) {
+  global_buffer = calloc(NUM_CHANNELS * BUFFER_SIZE, sizeof(int));
+  int min[NUM_CHANNELS], max[NUM_CHANNELS] = {0};
+  for (int i = 0; i < NUM_CHANNELS; i++) {
     adc_oneshot_config_channel(adc, i, &channelCfg);
     int gpio;
     adc_oneshot_channel_to_io(ADC_UNIT_1, i, &gpio);
@@ -124,26 +94,34 @@ void app_main() {
   xTaskCreate(console_task, "console", 4096, NULL, 5, NULL);
 
   bool isDisabled = false;
+  int inference_timer = 0;
+
   while (1) {
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < NUM_CHANNELS; i++) {
       adc_oneshot_read(adc, i, global_buffer + i * BUFFER_SIZE + global_idx);
     }
     
     if (current_mode == MODE_INFER) {
-      setMinMax(global_buffer, 5, BUFFER_SIZE, min, max, &isDisabled, DISABLE_THRESHOLD);
-      printRes(global_buffer, global_idx, 5, BUFFER_SIZE, min, max);
+      setMinMax(global_buffer, NUM_CHANNELS, BUFFER_SIZE, min, max, &isDisabled, DISABLE_THRESHOLD);
+      
+      inference_timer += LOOP_PERIOD_MS;
+      if (inference_timer >= INFERENCE_INTERVAL_MS) {
+          run_knn_inference(global_buffer, NUM_CHANNELS, BUFFER_SIZE, 3);
+          inference_timer = 0;
+      }
+
+      printRes(global_buffer, global_idx, NUM_CHANNELS, BUFFER_SIZE, min, max);
       printf(">d:%d\n", isDisabled);
     } else {
-      // In TRAIN mode, maybe less printing, or indicate we are training
       printf(">mode:TRAIN idx:%d\n", global_idx);
     }
 
     if (should_store) {
-      save_buffer_to_nvs(store_label, global_buffer, global_idx);
+      save_buffer_to_nvs(store_label, global_buffer, global_idx, NUM_CHANNELS, BUFFER_SIZE);
       should_store = false;
     }
 
     global_idx = (global_idx + 1) % BUFFER_SIZE;
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(LOOP_PERIOD_MS));
   };
 }

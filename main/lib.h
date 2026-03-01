@@ -3,9 +3,9 @@
 
 #include <stdbool.h>
 
-void setMinMax(int* buffer, int channel, int bufferSize, int* min, int* max,
-               bool* isDisabled, int disableThreshold);
-
+/**
+ * @brief Prints sensor results for debugging.
+ */
 void printRes(int* buffer, int idx, int channel, int bufferSize, int* min,
               int* max);
 
