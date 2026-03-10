@@ -304,11 +304,11 @@ export default function Home() {
           </div>
 
           {/* Dataset Management */}
-          <div className="glass-card rounded-2xl overflow-hidden flex flex-col min-h-[300px]">
+          <div className="glass-card rounded-2xl overflow-hidden flex flex-col min-h-[400px]">
              <div className="bg-panel-muted/50 p-4 border-b border-panel-border flex items-center justify-between">
               <h3 className="text-xs font-black uppercase tracking-[0.2em] text-text-bright flex items-center gap-2">
                 <Database className="w-4 h-4 text-accent" />
-                On-Chip Storage
+                On-Chip Storage ({latestData?.datasetList?.length || 0})
               </h3>
               <button 
                 onClick={() => sendData("list")}
@@ -318,19 +318,39 @@ export default function Home() {
               </button>
             </div>
             
-            <div className="flex-1 p-6 flex flex-col items-center justify-center text-center gap-4">
-               <div className="p-4 rounded-full bg-panel-muted border border-panel-border">
-                  <Database className="w-8 h-8 text-text-muted/20" />
-               </div>
-               <div className="space-y-1">
-                 <p className="text-xs font-bold text-text-muted uppercase tracking-tighter">Database Overview</p>
-                 <p className="text-[10px] text-text-muted/60 max-w-[150px]">Refresh to list records stored in SPIFFS memory.</p>
-               </div>
+            <div className="flex-1 overflow-y-auto max-h-[400px]">
+              {latestData?.datasetList && latestData.datasetList.length > 0 ? (
+                <div className="divide-y divide-panel-border/30">
+                  {latestData.datasetList.map((record) => (
+                    <div key={record.id} className="p-4 flex items-center justify-between group hover:bg-panel-muted/30 transition-colors">
+                      <div className="flex items-center gap-3">
+                        <span className="text-[10px] font-mono text-text-muted">{record.id.toString().padStart(2, '0')}</span>
+                        <span className="text-sm font-bold text-text-bright tracking-tight">{record.label}</span>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-text-muted/0 group-hover:text-text-muted transition-all" />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-12 flex flex-col items-center justify-center text-center gap-4">
+                  <div className="p-4 rounded-full bg-panel-muted border border-panel-border">
+                      <Database className="w-8 h-8 text-text-muted/20" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs font-bold text-text-muted uppercase tracking-tighter">Database Empty</p>
+                    <p className="text-[10px] text-text-muted/60 max-w-[150px]">Refresh to list records stored in SPIFFS memory.</p>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="p-4 mt-auto border-t border-panel-border/30">
               <button 
-                onClick={() => sendData("clear")}
+                onClick={() => {
+                  if(window.confirm("Are you sure you want to format the data partition? This cannot be undone.")) {
+                    sendData("clear");
+                  }
+                }}
                 className="w-full btn-danger flex items-center justify-center gap-2"
               >
                 <Trash2 className="w-4 h-4" />

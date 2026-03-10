@@ -2,6 +2,11 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 
+export interface DatasetRecord {
+  id: number;
+  label: string;
+}
+
 export interface SerialData {
   raw: number[];
   mapped: number[];
@@ -11,6 +16,7 @@ export interface SerialData {
   predictionDistance?: string;
   mode?: string;
   disabled?: boolean;
+  datasetList: DatasetRecord[];
 }
 
 export function useWebSerial() {
@@ -77,7 +83,8 @@ export function useWebSerial() {
         prediction: undefined,
         predictionDistance: undefined,
         mode: "UNKNOWN",
-        disabled: false
+        disabled: false,
+        datasetList: []
       };
 
       try {
@@ -101,32 +108,45 @@ export function useWebSerial() {
                   const matchMin = trimmed.match(/^>min(\d+):(-?\d+)$/);
                   const matchMode = trimmed.match(/^>mode:(.+)$/);
                   const matchD = trimmed.match(/^>d:(\d+)$/);
+                  const matchList = trimmed.match(/^>list:(\d+):(.+)$/);
                   
                   if (matchMapped) {
                     currentData.mapped[parseInt(matchMapped[1])] = parseInt(matchMapped[2]);
                     isDataLine = true;
-                    setLatestData({ ...currentData, raw: [...currentData.raw], mapped: [...currentData.mapped], min: [...currentData.min], max: [...currentData.max] });
+                    setLatestData({ ...currentData, raw: [...currentData.raw], mapped: [...currentData.mapped], min: [...currentData.min], max: [...currentData.max], datasetList: [...currentData.datasetList] });
                   } else if (matchRaw) {
                     currentData.raw[parseInt(matchRaw[1])] = parseInt(matchRaw[2]);
                     isDataLine = true;
-                    setLatestData({ ...currentData, raw: [...currentData.raw], mapped: [...currentData.mapped], min: [...currentData.min], max: [...currentData.max] });
+                    setLatestData({ ...currentData, raw: [...currentData.raw], mapped: [...currentData.mapped], min: [...currentData.min], max: [...currentData.max], datasetList: [...currentData.datasetList] });
                   } else if (matchMax) {
                     currentData.max[parseInt(matchMax[1])] = parseInt(matchMax[2]);
                     isDataLine = true;
-                    setLatestData({ ...currentData, raw: [...currentData.raw], mapped: [...currentData.mapped], min: [...currentData.min], max: [...currentData.max] });
+                    setLatestData({ ...currentData, raw: [...currentData.raw], mapped: [...currentData.mapped], min: [...currentData.min], max: [...currentData.max], datasetList: [...currentData.datasetList] });
                   } else if (matchMin) {
                     currentData.min[parseInt(matchMin[1])] = parseInt(matchMin[2]);
                     isDataLine = true;
-                    setLatestData({ ...currentData, raw: [...currentData.raw], mapped: [...currentData.mapped], min: [...currentData.min], max: [...currentData.max] });
+                    setLatestData({ ...currentData, raw: [...currentData.raw], mapped: [...currentData.mapped], min: [...currentData.min], max: [...currentData.max], datasetList: [...currentData.datasetList] });
                   } else if (matchD) {
                     currentData.disabled = matchD[1] !== "0";
                     isDataLine = true;
-                    setLatestData({ ...currentData, raw: [...currentData.raw], mapped: [...currentData.mapped], min: [...currentData.min], max: [...currentData.max] });
+                    setLatestData({ ...currentData, raw: [...currentData.raw], mapped: [...currentData.mapped], min: [...currentData.min], max: [...currentData.max], datasetList: [...currentData.datasetList] });
                   } else if (matchMode) {
                     currentData.mode = matchMode[1];
                     isDataLine = true;
-                    setLatestData({ ...currentData, raw: [...currentData.raw], mapped: [...currentData.mapped], min: [...currentData.min], max: [...currentData.max] });
+                    setLatestData({ ...currentData, raw: [...currentData.raw], mapped: [...currentData.mapped], min: [...currentData.min], max: [...currentData.max], datasetList: [...currentData.datasetList] });
+                  } else if (matchList) {
+                    const id = parseInt(matchList[1]);
+                    const label = matchList[2];
+                    // If id is 1, it's a new list, clear the old one
+                    if (id === 1) currentData.datasetList = [];
+                    currentData.datasetList.push({ id, label });
+                    isDataLine = true;
+                    setLatestData({ ...currentData, raw: [...currentData.raw], mapped: [...currentData.mapped], min: [...currentData.min], max: [...currentData.max], datasetList: [...currentData.datasetList] });
                   }
+                } else if (trimmed.startsWith("Stored items in dataset:")) {
+                   // Clear list when we start receiving list output
+                   currentData.datasetList = [];
+                   isDataLine = true;
                 } else if (trimmed.startsWith("Best Match:")) {
                   // Example format: Best Match: [Tap] (Dist: 0.00)
                   const matchPred = trimmed.match(/Best Match: \[(.*?)\] \(Dist: ([\d.]+)\)/);

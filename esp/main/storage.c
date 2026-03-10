@@ -74,7 +74,7 @@ void list_stored_buffers(int num_channels, int buffer_size) {
     int count = 0;
     printf("Stored items in dataset:\n");
     while (fread(&record, sizeof(sample_record_t), 1, f) == 1) {
-        printf("%d. Label: %s\n", ++count, record.label);
+        printf(">list:%d:%s\n", ++count, record.label);
         // Print first few values of CH0 for verification
         printf("  CH0 (first %d): ", DEBUG_PRINT_SAMPLES_COUNT);
         for (int i = 0; i < DEBUG_PRINT_SAMPLES_COUNT; i++) {
