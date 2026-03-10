@@ -5,6 +5,7 @@
 #include "esp_spiffs.h"
 #include "esp_log.h"
 #include "config.h"
+#include "ble_uart.h"
 
 static const char* TAG = "STORAGE";
 
@@ -66,24 +67,24 @@ void save_buffer_to_spiffs(const char* label, float* buffer, int num_channels, i
 void list_stored_buffers(int num_channels, int buffer_size) {
     FILE* f = fopen(DATASET_PATH, "rb");
     if (f == NULL) {
-        printf("No dataset found or failed to open file.\n");
+        telemetry_printf("No dataset found or failed to open file.\n");
         return;
     }
 
     sample_record_t record;
     int count = 0;
-    printf("Stored items in dataset:\n");
+    telemetry_printf("Stored items in dataset:\n");
     while (fread(&record, sizeof(sample_record_t), 1, f) == 1) {
-        printf(">list:%d:%s\n", ++count, record.label);
+        telemetry_printf(">list:%d:%s\n", ++count, record.label);
     }
-    printf("Total samples: %d\n", count);
+    telemetry_printf("Total samples: %d\n", count);
     fclose(f);
 }
 
 void read_sample_by_id(int id, int num_channels, int buffer_size) {
     FILE* f = fopen(DATASET_PATH, "rb");
     if (f == NULL) {
-        printf("No dataset found.\n");
+        telemetry_printf("No dataset found.\n");
         return;
     }
 
@@ -94,28 +95,28 @@ void read_sample_by_id(int id, int num_channels, int buffer_size) {
         current_id++;
         if (current_id == id) {
             found = true;
-            printf(">data_start:%d:%s\n", id, record.label);
+            telemetry_printf(">data_start:%d:%s\n", id, record.label);
             for (int ch = 0; ch < num_channels; ch++) {
-                printf(">ch:%d:", ch);
+                telemetry_printf(">ch:%d:", ch);
                 for (int i = 0; i < buffer_size; i++) {
-                    printf("%.2f%s", record.data[ch * buffer_size + i], (i == buffer_size - 1) ? "" : ",");
+                    telemetry_printf("%.2f%s", record.data[ch * buffer_size + i], (i == buffer_size - 1) ? "" : ",");
                 }
-                printf("\n");
+                telemetry_printf("\n");
             }
-            printf(">data_end\n");
+            telemetry_printf(">data_end\n");
             break;
         }
     }
     if (!found) {
-        printf("Sample ID %d not found.\n", id);
+        telemetry_printf("Sample ID %d not found.\n", id);
     }
     fclose(f);
 }
 
 void clear_stored_buffers() {
     if (remove(DATASET_PATH) == 0) {
-        printf("Dataset deleted successfully.\n");
+        telemetry_printf("Dataset deleted successfully.\n");
     } else {
-        printf("No dataset file to delete or error occurred.\n");
+        telemetry_printf("No dataset file to delete or error occurred.\n");
     }
 }

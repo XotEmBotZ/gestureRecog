@@ -17,24 +17,17 @@ import {
   RefreshCw,
   ChevronRight,
   Info,
-  X
+  X,
+  Bluetooth
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function Home() {
-  const { isConnected, connect, disconnect, latestData, sendData } = useWebSerial();
+  const { isConnected, connectionType, connectUSB, connectBLE, disconnect, latestData, sendData } = useWebSerial();
   const [mode, setMode] = useState<"TRAIN" | "INFERENCE" | "CALIBRATE">("INFERENCE");
   const [kNeighbors, setKNeighbors] = useState(3);
   const [storeLabel, setStoreLabel] = useState("");
   const [showDetail, setShowDetail] = useState(false);
-  
-  const handleConnect = () => {
-    if (isConnected) {
-      disconnect();
-    } else {
-      connect();
-    }
-  };
 
   const setESPMode = (newMode: typeof mode) => {
     setMode(newMode);
@@ -124,18 +117,32 @@ export default function Home() {
         </div>
         
         <div className="flex items-center gap-3">
-          <button 
-            onClick={handleConnect}
-            className={cn(
-              "btn-base flex items-center gap-2 text-sm md:text-base px-3 md:px-5",
-              isConnected 
-                ? "bg-danger/10 text-danger border border-danger/20 hover:bg-danger hover:text-white" 
-                : "accent-gradient text-black hover:shadow-glow"
-            )}
-          >
-            <Plug className="w-4 h-4" />
-            <span className="hidden sm:inline">{isConnected ? "Disconnect" : "Connect"}</span>
-          </button>
+          {!isConnected ? (
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={connectUSB}
+                className="btn-base flex items-center gap-2 text-sm md:text-base px-3 md:px-5 accent-gradient text-black hover:shadow-glow"
+              >
+                <Plug className="w-4 h-4" />
+                <span className="hidden sm:inline">Connect USB</span>
+              </button>
+              <button 
+                onClick={connectBLE}
+                className="btn-base flex items-center gap-2 text-sm md:text-base px-3 md:px-5 bg-info/10 text-info border border-info/20 hover:bg-info hover:text-white"
+              >
+                <Bluetooth className="w-4 h-4" />
+                <span className="hidden sm:inline">Connect BLE</span>
+              </button>
+            </div>
+          ) : (
+            <button 
+              onClick={disconnect}
+              className="btn-base flex items-center gap-2 text-sm md:text-base px-3 md:px-5 bg-danger/10 text-danger border border-danger/20 hover:bg-danger hover:text-white"
+            >
+              {connectionType === "USB" ? <Plug className="w-4 h-4" /> : <Bluetooth className="w-4 h-4" />}
+              <span>Disconnect {connectionType}</span>
+            </button>
+          )}
         </div>
       </nav>
 

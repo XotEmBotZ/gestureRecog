@@ -9,6 +9,7 @@
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "config.h"
+#include "ble_uart.h"
 
 static const char* TAG = "INFERENCE";
 
@@ -41,7 +42,7 @@ void run_knn_inference(float* current_norm_buffer, int num_channels, int buffer_
     
     FILE* f = fopen(DATASET_PATH, "rb");
     if (f == NULL) {
-        printf("KNN: No dataset file found.\n");
+        telemetry_printf("KNN: No dataset file found.\n");
         return;
     }
 
@@ -93,20 +94,20 @@ void run_knn_inference(float* current_norm_buffer, int num_channels, int buffer_
     int64_t duration_us = esp_timer_get_time() - start_time;
 
     if (samples_checked > 0) {
-        printf("\n=== KNN INFERENCE REPORT (FILE-BASED) ===\n");
-        printf(">time:%lld\n", duration_us);
-        printf("Samples Processed: %d\n", samples_checked);
-        printf("Best Match: [%s] (Dist: %.2f)\n", top_k[0].label, top_k[0].distance);
-        printf("---------------------------\n");
-        printf("Top %d Matches:\n", k);
+        telemetry_printf("\n=== KNN INFERENCE REPORT (FILE-BASED) ===\n");
+        telemetry_printf(">time:%lld\n", duration_us);
+        telemetry_printf("Samples Processed: %d\n", samples_checked);
+        telemetry_printf("Best Match: [%s] (Dist: %.2f)\n", top_k[0].label, top_k[0].distance);
+        telemetry_printf("---------------------------\n");
+        telemetry_printf("Top %d Matches:\n", k);
         for (int i = 0; i < k; i++) {
             if (top_k[i].distance != INFINITY) {
-                printf(" %d. %s (%.2f)\n", i + 1, top_k[i].label, top_k[i].distance);
+                telemetry_printf(" %d. %s (%.2f)\n", i + 1, top_k[i].label, top_k[i].distance);
             }
         }
-        printf("===========================\n");
+        telemetry_printf("===========================\n");
     } else {
-        printf("KNN: Dataset is empty.\n");
+        telemetry_printf("KNN: Dataset is empty.\n");
     }
 
     free(record_batch);

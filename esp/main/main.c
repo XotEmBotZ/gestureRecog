@@ -16,6 +16,9 @@
 #include "nvs_flash.h"
 #include "preprocess.h"
 #include "storage.h"
+#include "ble_uart.h"
+
+QueueHandle_t ble_rx_queue = NULL;
 
 typedef enum { MODE_INFER, MODE_TRAIN, MODE_CALIBRATE } app_mode_t;
 
@@ -32,76 +35,96 @@ static char store_label[MAX_LABEL_LENGTH] = {0};
 static int k_neighbors = DEFAULT_K_NEIGHBORS;
 
 void show_help() {
-  printf("\n=== ESP-Ossicoloscope Help (File-Based Storage) ===\n");
-  printf("Commands:\n");
-  printf("  %s          - Show this help message\n", CMD_HELP);
-  printf("  %s    - Switch to Training Mode\n", CMD_MODE_TRAIN);
-  printf("  %s    - Switch to Inference Mode (KNN)\n", CMD_MODE_INFER);
-  printf("  %s - Switch to Calibration Mode (Move fingers to extremes)\n", CMD_MODE_CALIBRATE);
-  printf("  %s<label> - Append current preprocessed buffer to dataset file\n",
+  telemetry_printf("\n=== ESP-Ossicoloscope Help (File-Based Storage) ===\n");
+  telemetry_printf("Commands:\n");
+  telemetry_printf("  %s          - Show this help message\n", CMD_HELP);
+  telemetry_printf("  %s    - Switch to Training Mode\n", CMD_MODE_TRAIN);
+  telemetry_printf("  %s    - Switch to Inference Mode (KNN)\n", CMD_MODE_INFER);
+  telemetry_printf("  %s - Switch to Calibration Mode (Move fingers to extremes)\n", CMD_MODE_CALIBRATE);
+  telemetry_printf("  %s<label> - Append current preprocessed buffer to dataset file\n",
          CMD_STORE_PREFIX);
-  printf("  %s          - List all stored records in dataset file\n", CMD_LIST);
-  printf("  %s         - Permanently delete the dataset file\n", CMD_CLEAR);
-  printf("  %s<number>    - Set number of neighbors for KNN (Current: %d)\n",
+  telemetry_printf("  %s          - List all stored records in dataset file\n", CMD_LIST);
+  telemetry_printf("  %s         - Permanently delete the dataset file\n", CMD_CLEAR);
+  telemetry_printf("  %s<number>    - Set number of neighbors for KNN (Current: %d)\n",
          CMD_K_PREFIX, k_neighbors);
-  printf("==============================\n");
+  telemetry_printf("==============================\n");
 }
 
-void console_task(void* arg) {
+void process_command(char* line) {
+  line[strcspn(line, "\n")] = 0;  // Remove newline
+  line[strcspn(line, "\r")] = 0;  // Remove carriage return
+  if (strlen(line) == 0) return;
+
+  if (strcmp(line, CMD_HELP) == 0) {
+    show_help();
+  } else if (strcmp(line, CMD_MODE_TRAIN) == 0) {
+    current_mode = MODE_TRAIN;
+    telemetry_printf("Switched to TRAIN mode\n");
+  } else if (strcmp(line, CMD_MODE_INFER) == 0) {
+    current_mode = MODE_INFER;
+    telemetry_printf("Switched to INFER mode\n");
+  } else if (strcmp(line, CMD_MODE_CALIBRATE) == 0) {
+    current_mode = MODE_CALIBRATE;
+    for (int i = 0; i < NUM_CHANNELS; i++) {
+        cal_min[i] = ADC_MAX_VALUE;
+        cal_max[i] = 0;
+    }
+    telemetry_printf("Switched to CALIBRATE mode. Move fingers to their full range.\n");
+  } else if (strcmp(line, CMD_LIST) == 0) {
+    list_stored_buffers(NUM_CHANNELS, BUFFER_SIZE);
+  } else if (strncmp(line, CMD_READ_PREFIX, strlen(CMD_READ_PREFIX)) == 0) {
+    int id = atoi(line + strlen(CMD_READ_PREFIX));
+    if (id > 0) {
+      read_sample_by_id(id, NUM_CHANNELS, BUFFER_SIZE);
+    } else {
+      telemetry_printf("Error: Invalid ID for read command\n");
+    }
+  } else if (strcmp(line, CMD_CLEAR) == 0) {
+    clear_stored_buffers();
+  } else if (strncmp(line, CMD_K_PREFIX, strlen(CMD_K_PREFIX)) == 0) {
+    int val = atoi(line + strlen(CMD_K_PREFIX));
+    if (val > 0 && val <= MAX_K_NEIGHBORS) {
+      k_neighbors = val;
+      telemetry_printf("KNN K-neighbors set to: %d\n", k_neighbors);
+    } else {
+      telemetry_printf("Error: K must be between 1 and %d\n", MAX_K_NEIGHBORS);
+    }
+  } else if (strncmp(line, CMD_STORE_PREFIX, strlen(CMD_STORE_PREFIX)) ==
+             0) {
+    if (current_mode != MODE_TRAIN) {
+      telemetry_printf("Error: Must be in TRAIN mode to store\n");
+    } else {
+      memset(store_label, 0, sizeof(store_label));
+      strncpy(store_label, line + strlen(CMD_STORE_PREFIX),
+              sizeof(store_label) - 1);
+      should_store = true;
+    }
+  } else {
+    telemetry_printf("Unknown command: %s. Type 'help' for available commands.\n",
+           line);
+  }
+}
+
+void stdin_task(void* arg) {
   char line[CONSOLE_LINE_BUFFER_SIZE];
   while (1) {
     if (fgets(line, sizeof(line), stdin)) {
-      line[strcspn(line, "\n")] = 0;  // Remove newline
-      if (strcmp(line, CMD_HELP) == 0) {
-        show_help();
-      } else if (strcmp(line, CMD_MODE_TRAIN) == 0) {
-        current_mode = MODE_TRAIN;
-        printf("Switched to TRAIN mode\n");
-      } else if (strcmp(line, CMD_MODE_INFER) == 0) {
-        current_mode = MODE_INFER;
-        printf("Switched to INFER mode\n");
-      } else if (strcmp(line, CMD_MODE_CALIBRATE) == 0) {
-        current_mode = MODE_CALIBRATE;
-        for (int i = 0; i < NUM_CHANNELS; i++) {
-            cal_min[i] = ADC_MAX_VALUE;
-            cal_max[i] = 0;
-        }
-        printf("Switched to CALIBRATE mode. Move fingers to their full range.\n");
-      } else if (strcmp(line, CMD_LIST) == 0) {
-        list_stored_buffers(NUM_CHANNELS, BUFFER_SIZE);
-      } else if (strncmp(line, CMD_READ_PREFIX, strlen(CMD_READ_PREFIX)) == 0) {
-        int id = atoi(line + strlen(CMD_READ_PREFIX));
-        if (id > 0) {
-          read_sample_by_id(id, NUM_CHANNELS, BUFFER_SIZE);
-        } else {
-          printf("Error: Invalid ID for read command\n");
-        }
-      } else if (strcmp(line, CMD_CLEAR) == 0) {
-        clear_stored_buffers();
-      } else if (strncmp(line, CMD_K_PREFIX, strlen(CMD_K_PREFIX)) == 0) {
-        int val = atoi(line + strlen(CMD_K_PREFIX));
-        if (val > 0 && val <= MAX_K_NEIGHBORS) {
-          k_neighbors = val;
-          printf("KNN K-neighbors set to: %d\n", k_neighbors);
-        } else {
-          printf("Error: K must be between 1 and %d\n", MAX_K_NEIGHBORS);
-        }
-      } else if (strncmp(line, CMD_STORE_PREFIX, strlen(CMD_STORE_PREFIX)) ==
-                 0) {
-        if (current_mode != MODE_TRAIN) {
-          printf("Error: Must be in TRAIN mode to store\n");
-        } else {
-          memset(store_label, 0, sizeof(store_label));
-          strncpy(store_label, line + strlen(CMD_STORE_PREFIX),
-                  sizeof(store_label) - 1);
-          should_store = true;
-        }
-      } else {
-        printf("Unknown command: %s. Type 'help' for available commands.\n",
-               line);
+      char* q_msg = strdup(line);
+      if (xQueueSend(ble_rx_queue, &q_msg, portMAX_DELAY) != pdTRUE) {
+          free(q_msg);
       }
     }
-    vTaskDelay(pdMS_TO_TICKS(LOOP_PERIOD_MS));
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+}
+
+void console_task(void* arg) {
+  char* line_ptr;
+  while (1) {
+    if (xQueueReceive(ble_rx_queue, &line_ptr, portMAX_DELAY)) {
+      process_command(line_ptr);
+      free(line_ptr);
+    }
   }
 }
 
@@ -114,6 +137,10 @@ void app_main() {
     ret = nvs_flash_init();
   }
   ESP_ERROR_CHECK(ret);
+
+  // Initialize BLE
+  ble_rx_queue = xQueueCreate(10, sizeof(char*));
+  ESP_ERROR_CHECK(ble_uart_init());
 
   // Initialize File System Storage
   ESP_ERROR_CHECK(init_storage());
@@ -156,6 +183,7 @@ void app_main() {
 
   xTaskCreate(console_task, "console", CONSOLE_TASK_STACK_SIZE, NULL,
               CONSOLE_TASK_PRIO, NULL);
+  xTaskCreate(stdin_task, "stdin", 2048, NULL, 5, NULL);
 
   bool isDisabled = false;
   int inference_timer = 0;
@@ -210,7 +238,7 @@ void app_main() {
       
       printRes((int)ema_state[i], proc, i, target_min, target_max);
     }
-    printf(">d:%d\n>mode:%s\n", (int)isDisabled,
+    telemetry_printf(">d:%d\n>mode:%s\n", (int)isDisabled,
            (current_mode == MODE_TRAIN) ? "TRAIN" : 
            (current_mode == MODE_CALIBRATE) ? "CALIBRATE" : "INFER");
 
