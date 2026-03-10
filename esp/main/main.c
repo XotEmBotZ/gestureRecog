@@ -21,6 +21,7 @@ typedef enum { MODE_INFER, MODE_TRAIN, MODE_CALIBRATE } app_mode_t;
 
 static const char* TAG = "APP";
 static app_mode_t current_mode = MODE_INFER;
+static bool plotter_enabled = false;
 static int* global_buffer = NULL;
 static float* global_norm_buffer = NULL;
 static float* ema_state = NULL;
@@ -44,7 +45,87 @@ void show_help() {
   printf("  %s         - Permanently delete the dataset file\n", CMD_CLEAR);
   printf("  %s<number>    - Set number of neighbors for KNN (Current: %d)\n",
          CMD_K_PREFIX, k_neighbors);
+<<<<<<< Updated upstream
   printf("==============================\n");
+=======
+  telemetry_printf("  plot on          - Enable plotter output\n");
+  telemetry_printf("  plot off         - Disable plotter output\n");
+  telemetry_printf("==============================\n");
+}
+
+void process_command(char* line) {
+  line[strcspn(line, "\n")] = 0;  // Remove newline
+  line[strcspn(line, "\r")] = 0;  // Remove carriage return
+  if (strlen(line) == 0) return;
+
+  if (strcmp(line, CMD_HELP) == 0) {
+    show_help();
+  } else if (strcmp(line, "plot on") == 0) {
+    plotter_enabled = true;
+    telemetry_printf("Plotter enabled\n");
+  } else if (strcmp(line, "plot off") == 0) {
+    plotter_enabled = false;
+    telemetry_printf("Plotter disabled\n");
+  } else if (strcmp(line, CMD_MODE_TRAIN) == 0) {
+    current_mode = MODE_TRAIN;
+    telemetry_printf("Switched to TRAIN mode\n");
+  } else if (strcmp(line, CMD_MODE_INFER) == 0) {
+    current_mode = MODE_INFER;
+    telemetry_printf("Switched to INFER mode\n");
+  } else if (strcmp(line, CMD_MODE_CALIBRATE) == 0) {
+    current_mode = MODE_CALIBRATE;
+    for (int i = 0; i < NUM_CHANNELS; i++) {
+        cal_min[i] = ADC_MAX_VALUE;
+        cal_max[i] = 0;
+    }
+    telemetry_printf("Switched to CALIBRATE mode. Move fingers to their full range.\n");
+  } else if (strcmp(line, CMD_LIST) == 0) {
+    list_stored_buffers(NUM_CHANNELS, BUFFER_SIZE);
+  } else if (strncmp(line, CMD_READ_PREFIX, strlen(CMD_READ_PREFIX)) == 0) {
+    int id = atoi(line + strlen(CMD_READ_PREFIX));
+    if (id > 0) {
+      read_sample_by_id(id, NUM_CHANNELS, BUFFER_SIZE);
+    } else {
+      telemetry_printf("Error: Invalid ID for read command\n");
+    }
+  } else if (strcmp(line, CMD_CLEAR) == 0) {
+    clear_stored_buffers();
+  } else if (strncmp(line, CMD_K_PREFIX, strlen(CMD_K_PREFIX)) == 0) {
+    int val = atoi(line + strlen(CMD_K_PREFIX));
+    if (val > 0 && val <= MAX_K_NEIGHBORS) {
+      k_neighbors = val;
+      telemetry_printf("KNN K-neighbors set to: %d\n", k_neighbors);
+    } else {
+      telemetry_printf("Error: K must be between 1 and %d\n", MAX_K_NEIGHBORS);
+    }
+  } else if (strncmp(line, CMD_STORE_PREFIX, strlen(CMD_STORE_PREFIX)) ==
+             0) {
+    if (current_mode != MODE_TRAIN) {
+      telemetry_printf("Error: Must be in TRAIN mode to store\n");
+    } else {
+      memset(store_label, 0, sizeof(store_label));
+      strncpy(store_label, line + strlen(CMD_STORE_PREFIX),
+              sizeof(store_label) - 1);
+      should_store = true;
+    }
+  } else {
+    telemetry_printf("Unknown command: %s. Type 'help' for available commands.\n",
+           line);
+  }
+}
+
+void stdin_task(void* arg) {
+  char line[CONSOLE_LINE_BUFFER_SIZE];
+  while (1) {
+    if (fgets(line, sizeof(line), stdin)) {
+      char* q_msg = strdup(line);
+      if (xQueueSend(ble_rx_queue, &q_msg, portMAX_DELAY) != pdTRUE) {
+          free(q_msg);
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+>>>>>>> Stashed changes
 }
 
 void console_task(void* arg) {
@@ -106,7 +187,7 @@ void console_task(void* arg) {
 }
 
 void app_main() {
-  // Initialize NVS (still needed for system/wifi components)
+  // 1. Initialize NVS (CRITICAL for RF calibration)
   esp_err_t ret = nvs_flash_init();
   if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||
       ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -115,8 +196,18 @@ void app_main() {
   }
   ESP_ERROR_CHECK(ret);
 
+<<<<<<< Updated upstream
   // Initialize File System Storage
   ESP_ERROR_CHECK(init_storage());
+=======
+  // 2. Initialize File System Storage
+  ESP_ERROR_CHECK(init_storage());
+
+  // 3. Initialize BLE (Move down to ensure other HW is ready)
+  ble_rx_queue = xQueueCreate(10, sizeof(char*));
+  ESP_ERROR_CHECK(ble_uart_init());
+  vTaskDelay(pdMS_TO_TICKS(1000)); // Give it time to settle
+>>>>>>> Stashed changes
 
   adc_oneshot_unit_handle_t adc;
   adc_oneshot_unit_init_cfg_t adcCfg = {
@@ -208,11 +299,21 @@ void app_main() {
       float proc = preprocess_sample((int)ema_state[i], target_min, target_max);
       global_norm_buffer[i * BUFFER_SIZE + global_idx] = proc;
       
-      printRes((int)ema_state[i], proc, i, target_min, target_max);
+      if (plotter_enabled) {
+          printRes((int)ema_state[i], proc, i, target_min, target_max);
+      }
     }
+    if (plotter_enabled) {
+        telemetry_printf(">d:%d\n>mode:%s\n", (int)isDisabled,
+               (current_mode == MODE_TRAIN) ? "TRAIN" : 
+               (current_mode == MODE_CALIBRATE) ? "CALIBRATE" : "INFER");
+    }
+<<<<<<< Updated upstream
     printf(">d:%d\n>mode:%s\n", (int)isDisabled,
            (current_mode == MODE_TRAIN) ? "TRAIN" : 
            (current_mode == MODE_CALIBRATE) ? "CALIBRATE" : "INFER");
+=======
+>>>>>>> Stashed changes
 
     if (current_mode == MODE_INFER && !isDisabled) {
       inference_timer += LOOP_PERIOD_MS;
