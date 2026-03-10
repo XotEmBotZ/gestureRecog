@@ -1,6 +1,15 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import { serial as polyfillSerial } from "web-serial-polyfill";
+
+// Helper to get the correct serial object
+const getSerial = () => {
+  if (typeof navigator !== "undefined" && "serial" in navigator) {
+    return (navigator as any).serial;
+  }
+  return polyfillSerial;
+};
 
 export interface DatasetRecord {
   id: number;
@@ -59,12 +68,14 @@ export function useWebSerial() {
 
   const connect = useCallback(async () => {
     try {
-      if (!("serial" in navigator)) {
-        addLog("Web Serial API not supported in this browser.");
+      const serial = getSerial();
+      if (!serial) {
+        addLog("Serial API (and polyfill) not supported in this browser.");
         return;
       }
 
-      const port = await navigator.serial.requestPort();
+      // Request port - on Android this will trigger a USB permission prompt
+      const port = await serial.requestPort();
       await port.open({ baudRate: 115200 }); // Adjust based on your ESP32
       portRef.current = port;
       setIsConnected(true);
