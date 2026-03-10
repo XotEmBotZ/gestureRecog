@@ -30,6 +30,11 @@ void save_buffer_to_spiffs(const char* label, float* buffer, int num_channels, i
 void list_stored_buffers(int num_channels, int buffer_size);
 
 /**
+ * @brief Reads a specific sample by ID and prints its data to console.
+ */
+void read_sample_by_id(int id, int num_channels, int buffer_size);
+
+/**
  * @brief Deletes the dataset file.
  */
 void clear_stored_buffers();

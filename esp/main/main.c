@@ -69,6 +69,13 @@ void console_task(void* arg) {
         printf("Switched to CALIBRATE mode. Move fingers to their full range.\n");
       } else if (strcmp(line, CMD_LIST) == 0) {
         list_stored_buffers(NUM_CHANNELS, BUFFER_SIZE);
+      } else if (strncmp(line, CMD_READ_PREFIX, strlen(CMD_READ_PREFIX)) == 0) {
+        int id = atoi(line + strlen(CMD_READ_PREFIX));
+        if (id > 0) {
+          read_sample_by_id(id, NUM_CHANNELS, BUFFER_SIZE);
+        } else {
+          printf("Error: Invalid ID for read command\n");
+        }
       } else if (strcmp(line, CMD_CLEAR) == 0) {
         clear_stored_buffers();
       } else if (strncmp(line, CMD_K_PREFIX, strlen(CMD_K_PREFIX)) == 0) {

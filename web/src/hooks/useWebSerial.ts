@@ -17,6 +17,11 @@ export interface SerialData {
   mode?: string;
   disabled?: boolean;
   datasetList: DatasetRecord[];
+  selectedSampleData?: {
+    id: number;
+    label: string;
+    channels: number[][];
+  };
 }
 
 export function useWebSerial() {
@@ -84,7 +89,8 @@ export function useWebSerial() {
         predictionDistance: undefined,
         mode: "UNKNOWN",
         disabled: false,
-        datasetList: []
+        datasetList: [],
+        selectedSampleData: undefined
       };
 
       try {
@@ -109,6 +115,9 @@ export function useWebSerial() {
                   const matchMode = trimmed.match(/^>mode:(.+)$/);
                   const matchD = trimmed.match(/^>d:(\d+)$/);
                   const matchList = trimmed.match(/^>list:(\d+):(.+)$/);
+                  const matchDataStart = trimmed.match(/^>data_start:(\d+):(.+)$/);
+                  const matchDataCh = trimmed.match(/^>ch:(\d+):(.+)$/);
+                  const matchDataEnd = trimmed.match(/^>data_end$/);
                   
                   if (matchMapped) {
                     currentData.mapped[parseInt(matchMapped[1])] = parseInt(matchMapped[2]);
@@ -142,6 +151,21 @@ export function useWebSerial() {
                     currentData.datasetList.push({ id, label });
                     isDataLine = true;
                     setLatestData({ ...currentData, raw: [...currentData.raw], mapped: [...currentData.mapped], min: [...currentData.min], max: [...currentData.max], datasetList: [...currentData.datasetList] });
+                  } else if (matchDataStart) {
+                    currentData.selectedSampleData = {
+                      id: parseInt(matchDataStart[1]),
+                      label: matchDataStart[2],
+                      channels: []
+                    };
+                    isDataLine = true;
+                  } else if (matchDataCh && currentData.selectedSampleData) {
+                    const ch = parseInt(matchDataCh[1]);
+                    const data = matchDataCh[2].split(',').map(v => parseFloat(v));
+                    currentData.selectedSampleData.channels[ch] = data;
+                    isDataLine = true;
+                  } else if (matchDataEnd && currentData.selectedSampleData) {
+                    isDataLine = true;
+                    setLatestData({ ...currentData, raw: [...currentData.raw], mapped: [...currentData.mapped], min: [...currentData.min], max: [...currentData.max], datasetList: [...currentData.datasetList], selectedSampleData: { ...currentData.selectedSampleData, channels: [...currentData.selectedSampleData.channels] } });
                   }
                 } else if (trimmed.startsWith("Stored items in dataset:")) {
                    // Clear list when we start receiving list output

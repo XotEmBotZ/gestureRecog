@@ -75,14 +75,40 @@ void list_stored_buffers(int num_channels, int buffer_size) {
     printf("Stored items in dataset:\n");
     while (fread(&record, sizeof(sample_record_t), 1, f) == 1) {
         printf(">list:%d:%s\n", ++count, record.label);
-        // Print first few values of CH0 for verification
-        printf("  CH0 (first %d): ", DEBUG_PRINT_SAMPLES_COUNT);
-        for (int i = 0; i < DEBUG_PRINT_SAMPLES_COUNT; i++) {
-            printf("%.2f%s", record.data[i], (i == DEBUG_PRINT_SAMPLES_COUNT - 1) ? "" : ", ");
-        }
-        printf("\n");
     }
     printf("Total samples: %d\n", count);
+    fclose(f);
+}
+
+void read_sample_by_id(int id, int num_channels, int buffer_size) {
+    FILE* f = fopen(DATASET_PATH, "rb");
+    if (f == NULL) {
+        printf("No dataset found.\n");
+        return;
+    }
+
+    sample_record_t record;
+    int current_id = 0;
+    bool found = false;
+    while (fread(&record, sizeof(sample_record_t), 1, f) == 1) {
+        current_id++;
+        if (current_id == id) {
+            found = true;
+            printf(">data_start:%d:%s\n", id, record.label);
+            for (int ch = 0; ch < num_channels; ch++) {
+                printf(">ch:%d:", ch);
+                for (int i = 0; i < buffer_size; i++) {
+                    printf("%.2f%s", record.data[ch * buffer_size + i], (i == buffer_size - 1) ? "" : ",");
+                }
+                printf("\n");
+            }
+            printf(">data_end\n");
+            break;
+        }
+    }
+    if (!found) {
+        printf("Sample ID %d not found.\n", id);
+    }
     fclose(f);
 }
 

@@ -43,6 +43,7 @@
 #define CMD_MODE_INFER "mode infer"
 #define CMD_MODE_CALIBRATE "mode calibrate"
 #define CMD_LIST "list"
+#define CMD_READ_PREFIX "read "
 #define CMD_CLEAR "clear"
 #define CMD_K_PREFIX "k "
 #define CMD_STORE_PREFIX "store "

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { RealtimeChart } from "@/components/Chart";
+import { StaticSampleChart } from "@/components/StaticSampleChart";
 import { useWebSerial } from "@/hooks/useWebSerial";
 import { 
   Activity, 
@@ -15,7 +16,8 @@ import {
   Cpu,
   RefreshCw,
   ChevronRight,
-  Info
+  Info,
+  X
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -24,6 +26,7 @@ export default function Home() {
   const [mode, setMode] = useState<"TRAIN" | "INFERENCE" | "CALIBRATE">("INFERENCE");
   const [kNeighbors, setKNeighbors] = useState(3);
   const [storeLabel, setStoreLabel] = useState("");
+  const [showDetail, setShowDetail] = useState(false);
   
   const handleConnect = () => {
     if (isConnected) {
@@ -42,12 +45,69 @@ export default function Home() {
     }
   };
 
+  const handleItemClick = (id: number) => {
+    sendData(`read ${id}`);
+    setShowDetail(true);
+  };
+
   const currentMode = latestData?.mode || mode;
   const isDisabled = latestData?.disabled;
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-text-main selection:bg-accent/30 overflow-x-hidden">
       
+      {/* Detail Overlay */}
+      {showDetail && latestData?.selectedSampleData && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-8">
+          <div className="absolute inset-0 bg-background/80 backdrop-blur-sm" onClick={() => setShowDetail(false)} />
+          <div className="glass-card w-full max-w-3xl rounded-3xl overflow-hidden relative animate-in zoom-in-95 duration-200">
+            <div className="bg-panel-muted/50 p-6 border-b border-panel-border flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="p-3 rounded-2xl bg-accent/10 border border-accent/20">
+                  <Database className="text-accent w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-text-bright tracking-tight">
+                    {latestData.selectedSampleData.label}
+                  </h3>
+                  <p className="text-xs font-mono text-text-muted">Storage ID: {latestData.selectedSampleData.id.toString().padStart(2, '0')}</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowDetail(false)}
+                className="p-2 rounded-xl hover:bg-panel-border transition-colors text-text-muted hover:text-text-bright"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-6">
+              <div className="bg-[#05070a]/50 rounded-2xl border border-panel-border p-4">
+                <StaticSampleChart channels={latestData.selectedSampleData.channels} />
+              </div>
+              
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                {latestData.selectedSampleData.channels.map((ch, i) => (
+                  <div key={i} className="bg-panel-muted/30 border border-panel-border/50 rounded-xl p-3 text-center">
+                    <span className="text-[10px] font-black text-text-muted uppercase block mb-1">CH {i}</span>
+                    <span className="text-xs font-mono text-info">{ch.length} Samples</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            <div className="p-6 bg-panel-muted/20 border-t border-panel-border flex justify-end">
+              <button 
+                onClick={() => setShowDetail(false)}
+                className="btn-secondary px-8"
+              >
+                Close View
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* --- Top Navbar --- */}
       <nav className="sticky top-0 z-50 glass-card border-x-0 border-t-0 px-4 md:px-8 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3 group cursor-default">
@@ -322,13 +382,17 @@ export default function Home() {
               {latestData?.datasetList && latestData.datasetList.length > 0 ? (
                 <div className="divide-y divide-panel-border/30">
                   {latestData.datasetList.map((record) => (
-                    <div key={record.id} className="p-4 flex items-center justify-between group hover:bg-panel-muted/30 transition-colors">
+                    <button 
+                      key={record.id} 
+                      onClick={() => handleItemClick(record.id)}
+                      className="w-full p-4 flex items-center justify-between group hover:bg-panel-muted/30 transition-colors text-left"
+                    >
                       <div className="flex items-center gap-3">
                         <span className="text-[10px] font-mono text-text-muted">{record.id.toString().padStart(2, '0')}</span>
                         <span className="text-sm font-bold text-text-bright tracking-tight">{record.label}</span>
                       </div>
                       <ChevronRight className="w-4 h-4 text-text-muted/0 group-hover:text-text-muted transition-all" />
-                    </div>
+                    </button>
                   ))}
                 </div>
               ) : (
