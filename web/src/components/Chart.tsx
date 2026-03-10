@@ -74,6 +74,7 @@ export function RealtimeChart({ latestRaw = [], latestMapped = [] }: { latestRaw
         borderColor: COLORS[i],
         backgroundColor: COLORS[i],
         borderWidth: 2,
+        borderDash: [5, 5], // Dashed line for raw
         pointRadius: 0,
         tension: 0.1,
       })),
@@ -82,8 +83,7 @@ export function RealtimeChart({ latestRaw = [], latestMapped = [] }: { latestRaw
         data,
         borderColor: COLORS[i],
         backgroundColor: COLORS[i],
-        borderWidth: 4,
-        borderDash: [10, 5], // Longer dashes for mapped
+        borderWidth: 2,
         pointRadius: 0,
         tension: 0.1,
       }))
