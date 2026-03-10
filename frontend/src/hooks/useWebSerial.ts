@@ -3,13 +3,36 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { serial as polyfillSerial } from "web-serial-polyfill";
 
+// Helper to check if we are on Android
+const isAndroid = () => {
+  return typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent);
+};
+
 // Helper to get the correct serial object
 const getSerial = () => {
-  if (typeof navigator !== "undefined" && "serial" in navigator) {
+  if (typeof navigator === "undefined") return null;
+  
+  // On Android, native Web Serial often only supports Bluetooth.
+  // We force the Polyfill (WebUSB) for wired USB support.
+  if (isAndroid()) {
+    console.log("Android detected: Using WebUSB Polyfill for Serial");
+    return polyfillSerial;
+  }
+
+  if ("serial" in navigator) {
     return (navigator as any).serial;
   }
+  
   return polyfillSerial;
 };
+
+// ESP32-S3 and common Serial converter filters
+const USB_FILTERS = [
+  { usbVendorId: 0x303a, usbProductId: 0x1001 }, // ESP32-S3 USB-Serial/JTAG
+  { usbVendorId: 0x303a, usbProductId: 0x8000 }, // ESP32-S3 
+  { usbVendorId: 0x10c4, usbProductId: 0xea60 }, // CP210x
+  { usbVendorId: 0x1a86, usbProductId: 0x7523 }, // CH340
+];
 
 export interface DatasetRecord {
   id: number;
@@ -74,8 +97,8 @@ export function useWebSerial() {
         return;
       }
 
-      // Request port - on Android this will trigger a USB permission prompt
-      const port = await serial.requestPort();
+      // Request port - include filters to help Android/WebUSB identify the device
+      const port = await serial.requestPort({ filters: USB_FILTERS });
       await port.open({ baudRate: 115200 }); // Adjust based on your ESP32
       portRef.current = port;
       setIsConnected(true);
