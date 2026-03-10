@@ -62,6 +62,10 @@ void console_task(void* arg) {
         printf("Switched to INFER mode\n");
       } else if (strcmp(line, CMD_MODE_CALIBRATE) == 0) {
         current_mode = MODE_CALIBRATE;
+        for (int i = 0; i < NUM_CHANNELS; i++) {
+            cal_min[i] = ADC_MAX_VALUE;
+            cal_max[i] = 0;
+        }
         printf("Switched to CALIBRATE mode. Move fingers to their full range.\n");
       } else if (strcmp(line, CMD_LIST) == 0) {
         list_stored_buffers(NUM_CHANNELS, BUFFER_SIZE);
@@ -175,8 +179,24 @@ void app_main() {
 
     for (int i = 0; i < NUM_CHANNELS; i++) {
       // 3. Normalize using Global Calibration (fall back to dynamic if not calibrated)
-      int target_min = (cal_min[i] < cal_max[i]) ? cal_min[i] : min[i];
-      int target_max = (cal_min[i] < cal_max[i]) ? cal_max[i] : max[i];
+      int target_min, target_max;
+      
+      // Check if global calibration has been performed (max > min)
+      bool has_global_cal = (cal_max[i] > cal_min[i]);
+
+      if (current_mode == MODE_CALIBRATE) {
+          // While calibrating, we MUST show the global bounds expanding
+          target_min = cal_min[i];
+          target_max = cal_max[i];
+      } else if (has_global_cal) {
+          // If we have a global calibration, use it
+          target_min = cal_min[i];
+          target_max = cal_max[i];
+      } else {
+          // Otherwise fall back to dynamic windowing
+          target_min = min[i];
+          target_max = max[i];
+      }
       
       float proc = preprocess_sample((int)ema_state[i], target_min, target_max);
       global_norm_buffer[i * BUFFER_SIZE + global_idx] = proc;

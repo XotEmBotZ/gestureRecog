@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #05070a;
+  --color-panel: #0d1117;
+  --color-panel-muted: #161b22;
+  --color-panel-border: #30363d;
+  --color-accent: #3fb950;
+  --color-accent-glow: rgba(63, 185, 80, 0.15);
+  --color-accent-hover: #2ea043;
+  --color-text-main: #c9d1d9;
+  --color-text-bright: #f0f6fc;
+  --color-text-muted: #8b949e;
+  --color-danger: #f85149;
+  --color-danger-hover: #da3633;
+  --color-warning: #d29922;
+  --color-info: #58a6ff;
+
+  --shadow-glow: 0 0 20px rgba(63, 185, 80, 0.2);
+  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.5);
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-text-main);
+  font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.glass-card {
+  background: rgba(13, 17, 23, 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--color-panel-border);
+  box-shadow: var(--shadow-card);
+}
+
+.accent-gradient {
+  background: linear-gradient(135deg, var(--color-accent), #2ea043);
+}
+
+.btn-base {
+  @apply px-4 py-2 rounded-lg font-semibold transition-all duration-200 active:scale-95 disabled:opacity-50 disabled:pointer-events-none;
+}
+
+.btn-primary {
+  @apply px-4 py-2 rounded-lg font-semibold transition-all duration-200 active:scale-95 disabled:opacity-50 disabled:pointer-events-none;
+  background: linear-gradient(135deg, var(--color-accent), #2ea043);
+  @apply text-[#000] hover:shadow-[0_0_15px_rgba(63,185,80,0.4)];
+}
+
+.btn-secondary {
+  @apply px-4 py-2 rounded-lg font-semibold transition-all duration-200 active:scale-95 disabled:opacity-50 disabled:pointer-events-none;
+  @apply bg-panel-muted border border-panel-border text-text-main hover:bg-panel-border;
+}
+
+.btn-danger {
+  @apply px-4 py-2 rounded-lg font-semibold transition-all duration-200 active:scale-95 disabled:opacity-50 disabled:pointer-events-none;
+  @apply bg-danger/10 border border-danger/30 text-danger hover:bg-danger hover:text-white;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-panel-border);
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+@layer utilities {
+  .animate-pulse-subtle {
+    animation: pulse-subtle 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+}
+
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
