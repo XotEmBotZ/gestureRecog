@@ -72,7 +72,7 @@ export function useWebSerial() {
       addLog("Connected to device.");
 
       const textDecoder = new TextDecoderStream();
-      const readableStreamClosed = port.readable?.pipeTo(textDecoder.writable).catch((e: Error) => {
+      const readableStreamClosed = port.readable?.pipeTo(textDecoder.writable as any).catch((e: Error) => {
         console.warn("pipeTo error:", e);
       });
       const reader = textDecoder.readable.getReader();
